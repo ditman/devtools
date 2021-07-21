@@ -4,10 +4,11 @@ import 'package:flutter/material.dart';
 import '../common_widgets.dart';
 import '../dialogs.dart';
 import '../theme.dart';
+import '../utils.dart';
 import 'label.dart';
 
 mixin FilterControllerMixin<T> {
-  final filteredData = ValueNotifier<List<T>>([]);
+  final filteredData = ListValueNotifier<T>([]);
 
   final activeFilter = ValueNotifier<QueryFilter>(null);
 
@@ -102,6 +103,7 @@ class _FilterDialogState extends State<FilterDialog> {
     return Container(
       height: defaultTextFieldHeight,
       child: TextField(
+        autofocus: true,
         controller: queryTextFieldController,
         decoration: InputDecoration(
           contentPadding: const EdgeInsets.all(denseSpacing),

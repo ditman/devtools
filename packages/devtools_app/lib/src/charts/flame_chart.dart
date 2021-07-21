@@ -17,6 +17,7 @@ import '../dialogs.dart';
 import '../extent_delegate_list.dart';
 import '../flutter_widgets/linked_scroll_controller.dart';
 import '../theme.dart';
+import '../trees.dart';
 import '../ui/colors.dart';
 import '../ui/search.dart';
 import '../utils.dart';
@@ -40,7 +41,7 @@ abstract class FlameChart<T, V> extends StatefulWidget {
     @required this.containerWidth,
     @required this.containerHeight,
     @required this.selectionNotifier,
-    @required this.onSelected,
+    @required this.onDataSelected,
     this.searchMatchesNotifier,
     this.activeSearchMatchNotifier,
     this.startInset = sideInset,
@@ -77,7 +78,7 @@ abstract class FlameChart<T, V> extends StatefulWidget {
 
   final ValueListenable<V> activeSearchMatchNotifier;
 
-  final void Function(V data) onSelected;
+  final void Function(V data) onDataSelected;
 
   double get startingContentWidth => containerWidth - startInset - endInset;
 }
@@ -86,7 +87,8 @@ abstract class FlameChart<T, V> extends StatefulWidget {
 // performance improvements. Optionally we could also do something clever with
 // grouping nodes that are close together until they are zoomed in (quad tree
 // like implementation).
-abstract class FlameChartState<T extends FlameChart, V> extends State<T>
+abstract class FlameChartState<T extends FlameChart,
+        V extends FlameChartDataMixin<V>> extends State<T>
     with AutoDisposeMixin, FlameChartColorMixin, TickerProviderStateMixin {
   int get rowOffsetForTopPadding => 2;
 
@@ -113,9 +115,10 @@ abstract class FlameChartState<T extends FlameChart, V> extends State<T>
   ScrollController _flameChartScrollController;
 
   /// Animation controller for animating flame chart zoom changes.
+  @visibleForTesting
   AnimationController zoomController;
 
-  double previousZoom = FlameChart.minZoomLevel;
+  double currentZoom = FlameChart.minZoomLevel;
 
   double horizontalScrollOffset = FlameChart.minScrollOffset;
 
@@ -127,16 +130,15 @@ abstract class FlameChartState<T extends FlameChart, V> extends State<T>
   // Zooming in via WASD controls will zoom the view in by 50% on each zoom. For
   // example, if the zoom level is 2.0, zooming by one unit would increase the
   // level to 3.0 (e.g. 2 + (2 * 0.5) = 3).
-  double get keyboardZoomInUnit => zoomController.value * 0.5;
+  double get keyboardZoomInUnit => currentZoom * 0.5;
 
   // Zooming out via WASD controls will zoom the view out to the previous zoom
   // level. For example, if the zoom level is 3.0, zooming out by one unit would
   // decrease the level to 2.0 (e.g. 3 - 3 * 1/3 = 2). See [wasdZoomInUnit]
   // for an explanation of how we previously zoomed from level 2.0 to level 3.0.
-  double get keyboardZoomOutUnit => zoomController.value * 1 / 3;
+  double get keyboardZoomOutUnit => currentZoom * 1 / 3;
 
-  double get contentWidthWithZoom =>
-      widget.startingContentWidth * zoomController.value;
+  double get contentWidthWithZoom => widget.startingContentWidth * currentZoom;
 
   double get widthWithZoom =>
       contentWidthWithZoom + widget.startInset + widget.endInset;
@@ -147,12 +149,12 @@ abstract class FlameChartState<T extends FlameChart, V> extends State<T>
         ? startTimeOffset
         : startTimeOffset +
             (horizontalScrollOffset - widget.startInset) /
-                zoomController.value /
+                currentZoom /
                 startingPxPerMicro;
 
     final endMicros = startTimeOffset +
         (horizontalScrollOffset - widget.startInset + widget.containerWidth) /
-            zoomController.value /
+            currentZoom /
             startingPxPerMicro;
 
     return TimeRange()
@@ -246,7 +248,6 @@ abstract class FlameChartState<T extends FlameChart, V> extends State<T>
       initFlameChartElements();
       horizontalControllerGroup.resetScroll();
       verticalControllerGroup.resetScroll();
-      previousZoom = FlameChart.minZoomLevel;
       zoomController.reset();
       verticalExtentDelegate.recompute();
     }
@@ -307,7 +308,7 @@ abstract class FlameChartState<T extends FlameChart, V> extends State<T>
           if (index >= rowOffsetForTopPadding && nodes.isEmpty) {
             // If this is a spacer row, we should use the background color of
             // the previous row with nodes.
-            for (int i = index; i > rowOffsetForTopPadding; i--) {
+            for (int i = index; i >= rowOffsetForTopPadding; i--) {
               // Look back until we find the first non-empty row.
               if (rows[i].nodes.isNotEmpty) {
                 rowBackgroundColor = alternatingColorForIndex(
@@ -333,7 +334,7 @@ abstract class FlameChartState<T extends FlameChart, V> extends State<T>
             activeSearchMatchNotifier: widget.activeSearchMatchNotifier,
             onTapUp: focusNode.requestFocus,
             backgroundColor: rowBackgroundColor,
-            zoom: zoomController.value,
+            zoom: currentZoom,
           );
         },
         childCount: rows.length,
@@ -376,12 +377,12 @@ abstract class FlameChartState<T extends FlameChart, V> extends State<T>
       if (keyLabel == 'w') {
         zoomTo(math.min(
           maxZoomLevel,
-          zoomController.value + keyboardZoomInUnit,
+          currentZoom + keyboardZoomInUnit,
         ));
       } else if (keyLabel == 's') {
         zoomTo(math.max(
           FlameChart.minZoomLevel,
-          zoomController.value - keyboardZoomOutUnit,
+          currentZoom - keyboardZoomOutUnit,
         ));
       } else if (keyLabel == 'a') {
         scrollToX(horizontalControllerGroup.offset - keyboardScrollUnit);
@@ -409,7 +410,6 @@ abstract class FlameChartState<T extends FlameChart, V> extends State<T>
             -FlameChart.maxScrollWheelDelta,
             FlameChart.maxScrollWheelDelta,
           );
-          final currentZoom = zoomController.value;
           // TODO(kenz): if https://github.com/flutter/flutter/issues/52762 is,
           // resolved, consider adjusting the multiplier based on the scroll device
           // kind (mouse or track pad).
@@ -432,27 +432,25 @@ abstract class FlameChartState<T extends FlameChart, V> extends State<T>
   }
 
   void _handleZoomControllerValueUpdate() {
+    final previousZoom = currentZoom;
+    final newZoom = zoomController.value;
+    if (previousZoom == newZoom) return;
+
+    // Store current scroll values for re-calculating scroll location on zoom.
+    final lastScrollOffset = horizontalControllerGroup.offset;
+
+    final safeMouseHoverX = mouseHoverX ?? widget.containerWidth / 2;
+    // Position in the zoomable coordinate space that we want to keep fixed.
+    final fixedX = safeMouseHoverX + lastScrollOffset - widget.startInset;
+
+    // Calculate the new horizontal scroll position.
+    final newScrollOffset = fixedX >= 0
+        ? fixedX * newZoom / previousZoom + widget.startInset - safeMouseHoverX
+        // We are in the fixed portion of the window - no need to transform.
+        : lastScrollOffset;
+
     setState(() {
-      final currentZoom = zoomController.value;
-      if (currentZoom == previousZoom) return;
-
-      // Store current scroll values for re-calculating scroll location on zoom.
-      final lastScrollOffset = horizontalControllerGroup.offset;
-
-      final safeMouseHoverX = mouseHoverX ?? widget.containerWidth / 2;
-      // Position in the zoomable coordinate space that we want to keep fixed.
-      final fixedX = safeMouseHoverX + lastScrollOffset - widget.startInset;
-
-      // Calculate the new horizontal scroll position.
-      final newScrollOffset = fixedX >= 0
-          ? fixedX * currentZoom / previousZoom +
-              widget.startInset -
-              safeMouseHoverX
-          // We are in the fixed portion of the window - no need to transform.
-          : lastScrollOffset;
-
-      previousZoom = currentZoom;
-
+      currentZoom = zoomController.value;
       // TODO(kenz): consult with Flutter team to see if there is a better place
       // to call this that guarantees the scroll controller offsets will be
       // updated for the new zoom level and layout size
@@ -528,27 +526,24 @@ abstract class FlameChartState<T extends FlameChart, V> extends State<T>
     @required int startMicros,
     @required int durationMicros,
     @required V data,
-    bool scrollHorizontally = true,
     bool scrollVertically = true,
     bool jumpZoom = false,
   }) async {
-    await Future.wait([
-      zoomToTimeRange(
-        startMicros: startMicros,
-        durationMicros: durationMicros,
-        jump: jumpZoom,
-      ),
-      if (scrollVertically) scrollVerticallyToData(data),
-    ]);
-    // Call this in a post frame callback so that the horizontal scroll
-    // controllers have had time to update their scroll extents. Otherwise, we
-    // can hit a race where are trying to scroll to an offset that is beyond
-    // what the scroll controller thinks its max scroll extent is.
-    if (scrollHorizontally) {
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        await scrollHorizontallyToData(data);
-      });
-    }
+    await zoomToTimeRange(
+      startMicros: startMicros,
+      durationMicros: durationMicros,
+      jump: jumpZoom,
+    );
+    // Call these in a post frame callback so that the scroll controllers have
+    // had time to update their scroll extents. Otherwise, we can hit a race
+    // where are trying to scroll to an offset that is beyond what the scroll
+    // controller thinks its max scroll extent is.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future.wait([
+        scrollHorizontallyToData(data),
+        if (scrollVertically) scrollVerticallyToData(data),
+      ]);
+    });
   }
 
   Future<void> zoomToTimeRange({
@@ -575,7 +570,8 @@ abstract class FlameChartState<T extends FlameChart, V> extends State<T>
   double startXForData(V data);
 }
 
-class ScrollingFlameChartRow<V> extends StatefulWidget {
+class ScrollingFlameChartRow<V extends FlameChartDataMixin<V>>
+    extends StatefulWidget {
   const ScrollingFlameChartRow({
     @required this.linkedScrollControllerGroup,
     @required this.nodes,
@@ -614,8 +610,8 @@ class ScrollingFlameChartRow<V> extends StatefulWidget {
       ScrollingFlameChartRowState<V>();
 }
 
-class ScrollingFlameChartRowState<V> extends State<ScrollingFlameChartRow>
-    with AutoDisposeMixin, SearchableMixin<V> {
+class ScrollingFlameChartRowState<V extends FlameChartDataMixin<V>>
+    extends State<ScrollingFlameChartRow> with AutoDisposeMixin {
   ScrollController scrollController;
 
   _ScrollingFlameChartRowExtentDelegate extentDelegate;
@@ -623,7 +619,7 @@ class ScrollingFlameChartRowState<V> extends State<ScrollingFlameChartRow>
   /// Convenience getter for widget.nodes.
   List<FlameChartNode<V>> get nodes => widget.nodes;
 
-  List<V> get nodeData => nodes.map((node) => node.data).toList();
+  List<V> _nodeData;
 
   V selected;
 
@@ -644,11 +640,13 @@ class ScrollingFlameChartRowState<V> extends State<ScrollingFlameChartRow>
       chartWidth: widget.width,
     );
 
+    _initNodeDataList();
+
     selected = widget.selectionNotifier.value;
     addAutoDisposeListener(widget.selectionNotifier, () {
-      final containsPreviousSelected = nodeData.contains(selected);
+      final containsPreviousSelected = _nodeData.contains(selected);
       final containsNewSelected =
-          nodeData.contains(widget.selectionNotifier.value);
+          _nodeData.contains(widget.selectionNotifier.value);
       selected = widget.selectionNotifier.value;
       // We only want to rebuild the row if it contains the previous or new
       // selected node.
@@ -658,46 +656,20 @@ class ScrollingFlameChartRowState<V> extends State<ScrollingFlameChartRow>
     });
 
     if (widget.searchMatchesNotifier != null) {
-      searchMatches = widget.searchMatchesNotifier.value;
-      addAutoDisposeListener(widget.searchMatchesNotifier, () {
-        final previousSearchMatchesInRow =
-            searchMatches.where((match) => nodeData.contains(match)).toList();
-        final newSearchMatchesInRow = widget.searchMatchesNotifier.value
-            .where((match) => nodeData.contains(match))
-            .toList();
-        searchMatches = widget.searchMatchesNotifier.value;
-
-        // We only want to rebuild the row if it contains the search matches in
-        // the row have changed.
-        // TODO(kenz): should we check for unordered equality here? Are there
-        // performance repercussions for doing so?
-        if (!collectionEquals(
-            previousSearchMatchesInRow, newSearchMatchesInRow)) {
-          setState(() {});
-        }
-      });
+      addAutoDisposeListener(widget.searchMatchesNotifier);
     }
 
     if (widget.activeSearchMatchNotifier != null) {
-      activeSearchMatch = widget.activeSearchMatchNotifier.value;
-      addAutoDisposeListener(widget.activeSearchMatchNotifier, () {
-        final containsPreviousActiveSearchMatch =
-            nodeData.contains(activeSearchMatch);
-        final containsNewActiveSearchMatch =
-            nodeData.contains(widget.activeSearchMatchNotifier.value);
-        activeSearchMatch = widget.activeSearchMatchNotifier.value;
-        // We only want to rebuild the row if it contains the previous or new
-        // active search match.
-        if (containsPreviousActiveSearchMatch || containsNewActiveSearchMatch) {
-          setState(() {});
-        }
-      });
+      addAutoDisposeListener(widget.activeSearchMatchNotifier);
     }
   }
 
   @override
   void didUpdateWidget(ScrollingFlameChartRow oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.nodes != widget.nodes) {
+      _initNodeDataList();
+    }
     if (oldWidget.nodes != widget.nodes ||
         oldWidget.zoom != widget.zoom ||
         oldWidget.width != widget.width ||
@@ -721,6 +693,10 @@ class ScrollingFlameChartRowState<V> extends State<ScrollingFlameChartRow>
     super.dispose();
     scrollController.dispose();
     _resetHovered();
+  }
+
+  void _initNodeDataList() {
+    _nodeData = nodes.map((node) => node.data).toList();
   }
 
   @override
@@ -783,8 +759,8 @@ class ScrollingFlameChartRowState<V> extends State<ScrollingFlameChartRow>
       child: node.buildWidget(
         selected: node.data == selected,
         hovered: node.data == hovered,
-        searchMatch: searchMatches?.contains(node.data) ?? false,
-        activeSearchMatch: activeSearchMatch == node.data,
+        searchMatch: node.data.isSearchMatch,
+        activeSearchMatch: node.data.isActiveSearchMatch,
         zoom: FlameChartUtils.zoomForNode(node, widget.zoom),
       ),
     );
@@ -792,7 +768,7 @@ class ScrollingFlameChartRowState<V> extends State<ScrollingFlameChartRow>
 
   void _handleMouseHover(PointerHoverEvent event) {
     final hoverNodeData =
-        binarySearchForNode(event.localPosition.dx - scrollController.offset)
+        binarySearchForNode(event.localPosition.dx + scrollController.offset)
             ?.data;
 
     if (hoverNodeData != hovered) {
@@ -814,7 +790,7 @@ class ScrollingFlameChartRowState<V> extends State<ScrollingFlameChartRow>
   }
 
   @visibleForTesting
-  FlameChartNode binarySearchForNode(double x) {
+  FlameChartNode<V> binarySearchForNode(double x) {
     int min = 0;
     int max = nodes.length;
     while (min < max) {
@@ -892,7 +868,7 @@ class FlameChartUtils {
     // the issue described in the bug where the scroll extent is smaller than
     // where we want to `jumpTo`. Smaller values were experimented with but the
     // issue still persisted, so we are using a very large number.
-    if (index == nodes.length - 1) return 10000000.0;
+    if (index == nodes.length - 1) return 1000000000000.0;
     final node = nodes[index];
     final nextNode = index == nodes.length - 1 ? null : nodes[index + 1];
     final nodeZoom = zoomForNode(node, chartZoom);
@@ -960,7 +936,7 @@ class FlameChartSection {
   final int endRow;
 }
 
-class FlameChartRow<T> {
+class FlameChartRow<T extends FlameChartDataMixin<T>> {
   FlameChartRow(this.index);
 
   final List<FlameChartNode<T>> nodes = [];
@@ -981,13 +957,17 @@ class FlameChartRow<T> {
   }
 }
 
+mixin FlameChartDataMixin<T extends TreeNode<T>>
+    on TreeDataSearchStateMixin<T> {
+  String get tooltip;
+}
+
 // TODO(kenz): consider de-coupling this API from the dual background color
 // scheme.
-class FlameChartNode<T> {
+class FlameChartNode<T extends FlameChartDataMixin<T>> {
   FlameChartNode({
     this.key,
     @required this.text,
-    @required this.tooltip,
     @required this.rect,
     @required this.backgroundColor,
     @required this.textColor,
@@ -1007,7 +987,6 @@ class FlameChartNode<T> {
   final Key key;
   final Rect rect;
   final String text;
-  final String tooltip;
   final Color backgroundColor;
   final Color textColor;
   final T data;
@@ -1057,18 +1036,19 @@ class FlameChartNode<T> {
               textAlign: TextAlign.left,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  color: _textColor(
-                selected: selected,
-                searchMatch: searchMatch,
-                activeSearchMatch: activeSearchMatch,
-              )),
+                color: _textColor(
+                  selected: selected,
+                  searchMatch: searchMatch,
+                  activeSearchMatch: activeSearchMatch,
+                ),
+              ),
             )
           : const SizedBox(),
     );
     if (hovered || !selectable) {
       return Tooltip(
         key: key,
-        message: tooltip,
+        message: data.tooltip,
         preferBelow: false,
         waitDuration: tooltipWait,
         child: node,

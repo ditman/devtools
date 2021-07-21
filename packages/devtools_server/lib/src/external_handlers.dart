@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:devtools_shared/devtools_server.dart';
 import 'package:path/path.dart' as path;
 import 'package:shelf/shelf.dart' as shelf;
 import 'package:shelf/shelf.dart';
@@ -15,7 +16,6 @@ import 'package:shelf_static/shelf_static.dart';
 import 'package:sse/server/sse_handler.dart';
 
 import 'client_manager.dart';
-import 'server_api.dart';
 
 // DO NOT IMPORT THIS FILE into any files other than `devtools_server.dart`.
 // This file is overwritten for internal DevTools builds, so any file depending
@@ -27,20 +27,13 @@ import 'server_api.dart';
 /// DevTools project.
 Future<shelf.Handler> defaultHandler(
   ClientManager clients, {
-  String customDevToolsPath,
+  String? customDevToolsPath,
   bool debugMode = false,
 }) async {
-  String buildDir = customDevToolsPath;
-  if (buildDir == null) {
-    final resourceUri = await Isolate.resolvePackageUri(
-        Uri(scheme: 'package', path: 'devtools/devtools.dart'));
-
-    final packageDir = path.dirname(path.dirname(resourceUri.toFilePath()));
-    buildDir = path.join(packageDir, 'build');
-  }
+  final buildDir = customDevToolsPath ?? await _resolveBuildDir();
 
   // Default static handler for all non-package requests.
-  Handler buildDirHandler;
+  Handler? buildDirHandler;
   if (!debugMode) {
     buildDirHandler = createStaticHandler(
       buildDir,
@@ -48,7 +41,7 @@ Future<shelf.Handler> defaultHandler(
     );
   }
 
-  Handler debugProxyHandler;
+  Handler? debugProxyHandler;
   if (debugMode) {
     // Start up a flutter run -d web-server instance.
     const webPort = 9101;
@@ -102,11 +95,23 @@ Future<shelf.Handler> defaultHandler(
     }
 
     if (debugMode) {
-      return debugProxyHandler(request);
+      return debugProxyHandler!(request);
     } else {
-      return buildDirHandler(request);
+      return buildDirHandler!(request);
     }
   };
 
   return handler;
+}
+
+Future<String> _resolveBuildDir() async {
+  final resourceUri = await Isolate.resolvePackageUri(
+    Uri(
+      scheme: 'package',
+      path: 'devtools/devtools.dart',
+    ),
+  );
+
+  final packageDir = path.dirname(path.dirname(resourceUri!.toFilePath()));
+  return path.join(packageDir, 'build');
 }

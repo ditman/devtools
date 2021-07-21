@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 import 'package:devtools_app/src/url_utils.dart';
-import 'package:test/test.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('url utils', () {
@@ -79,6 +79,15 @@ void main() {
             '  http%3A%2F%2F127.0.0.1%3A58824%2FCnvgRrQJG7w%3D   ',
           ).toString(),
           equals('http://127.0.0.1:58824/CnvgRrQJG7w='),
+        );
+      });
+
+      test('handles prefixed devtools server uris', () {
+        expect(
+          normalizeVmServiceUri(
+            'http://127.0.0.1:9101?uri=http%3A%2F%2F127.0.0.1%3A56142%2FHOwgrxalK00%3D%2F',
+          ).toString(),
+          equals('http://127.0.0.1:56142/HOwgrxalK00=/'),
         );
       });
 

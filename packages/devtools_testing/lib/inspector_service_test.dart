@@ -9,8 +9,7 @@ import 'dart:async';
 
 import 'package:devtools_app/src/inspector/diagnostics_node.dart';
 import 'package:devtools_app/src/inspector/inspector_service.dart';
-import 'package:flutter_test/flutter_test.dart' show equalsIgnoringHashCodes;
-import 'package:test/test.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 import 'matchers/matchers.dart';
 import 'support/flutter_test_driver.dart' show FlutterRunConfiguration;
@@ -19,12 +18,8 @@ import 'support/flutter_test_environment.dart';
 Future<void> runInspectorServiceTests(FlutterTestEnvironment env) async {
   InspectorService inspectorService;
 
-  env.afterNewSetup = () async {
-    await ensureInspectorServiceDependencies();
-  };
-
   env.afterEverySetup = () async {
-    inspectorService = await InspectorService.create(env.service);
+    inspectorService = InspectorService();
     if (env.runConfig.trackWidgetCreation) {
       await inspectorService.inferPubRootDirectoryIfNeeded();
     }
@@ -50,13 +45,6 @@ Future<void> runInspectorServiceTests(FlutterTestEnvironment env) async {
         expect(inspectorService.useDaemonApi, isTrue);
         // TODO(jacobr): add test where we trigger a breakpoint and verify that
         // the daemon api is now false.
-      });
-
-      test('hasServiceMethod', () async {
-        await env.setupEnvironment();
-        expect(inspectorService.hasServiceMethod('someDummyName'), isFalse);
-        expect(inspectorService.hasServiceMethod('getRootWidgetSummaryTree'),
-            isTrue);
       });
 
       test('createObjectGroup', () async {
@@ -104,7 +92,16 @@ Future<void> runInspectorServiceTests(FlutterTestEnvironment env) async {
           expect(
             (inspectorService.localClasses.keys.toList()..sort()),
             equals(
-              ['MyApp', 'MyOtherWidget', 'NotAWidget'],
+              [
+                'AnotherClass',
+                'ExportedClass',
+                'FooClass',
+                'MyApp',
+                'MyOtherWidget',
+                'NotAWidget',
+                '_PrivateClass',
+                '_PrivateExportedClass',
+              ],
             ),
           );
 
@@ -115,7 +112,16 @@ Future<void> runInspectorServiceTests(FlutterTestEnvironment env) async {
           expect(
             (inspectorService.localClasses.keys.toList()..sort()),
             equals(
-              ['MyApp', 'MyOtherWidget', 'NotAWidget'],
+              [
+                'AnotherClass',
+                'ExportedClass',
+                'FooClass',
+                'MyApp',
+                'MyOtherWidget',
+                'NotAWidget',
+                '_PrivateClass',
+                '_PrivateExportedClass'
+              ],
             ),
           );
 
@@ -446,7 +452,7 @@ Future<void> runInspectorServiceTests(FlutterTestEnvironment env) async {
 
       // TODO(jacobr): add tests verifying that we can stop the running device
       // without the InspectorService spewing a bunch of errors.
-    }, timeout: const Timeout.factor(8));
+    });
   } catch (e, s) {
     print(s);
   }

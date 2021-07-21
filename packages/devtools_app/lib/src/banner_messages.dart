@@ -19,6 +19,9 @@ const _runInProfileModeDocsUrl =
 const _profileGranularityDocsUrl =
     'https://flutter.dev/docs/development/tools/devtools/performance#profile-granularity';
 
+const preCompileShadersDocsUrl =
+    'https://flutter.dev/docs/perf/rendering/shader#how-to-use-sksl-warmup';
+
 class BannerMessagesController {
   final _messages = <String, ValueNotifier<List<BannerMessage>>>{};
   final _dismissedMessageKeys = <Key>{};
@@ -147,14 +150,24 @@ class BannerMessage extends StatelessWidget {
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   headerText,
                   style: Theme.of(context)
                       .textTheme
-                      .headline6
+                      .bodyText1
                       .copyWith(color: foregroundColor),
                 ),
+                const SizedBox(width: defaultSpacing),
+                Expanded(
+                  child: RichText(
+                    text: TextSpan(
+                      children: textSpans,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: defaultSpacing),
                 CircularIconButton(
                   icon: Icons.close,
                   backgroundColor: backgroundColor,
@@ -166,12 +179,6 @@ class BannerMessage extends StatelessWidget {
                       .removeMessage(this, dismiss: true),
                 ),
               ],
-            ),
-            const SizedBox(height: defaultSpacing),
-            RichText(
-              text: TextSpan(
-                children: textSpans,
-              ),
             ),
           ],
         ),
@@ -229,7 +236,6 @@ class DebugModePerformanceMessage {
         const TextSpan(
           text: '''
 You are running your app in debug mode. Debug mode performance is not indicative of release performance.
-
 Relaunch your application with the '--profile' argument, or ''',
           style: TextStyle(color: _BannerError.foreground),
         ),
@@ -242,6 +248,73 @@ Relaunch your application with the '--profile' argument, or ''',
           recognizer: TapGestureRecognizer()
             ..onTap = () async {
               await launchUrl(_runInProfileModeDocsUrl, context);
+            },
+        ),
+        const TextSpan(
+          text: '.',
+          style: TextStyle(color: _BannerError.foreground),
+        ),
+      ],
+      screenId: screenId,
+    );
+  }
+}
+
+class ProviderUnknownErrorBanner {
+  const ProviderUnknownErrorBanner({@required this.screenId});
+
+  final String screenId;
+
+  BannerMessage build(BuildContext context) {
+    return _BannerError(
+      key: Key('ProviderUnknownErrorBanner - $screenId'),
+      screenId: screenId,
+      textSpans: const [
+        TextSpan(
+          text: '''
+DevTools failed to connect with package:provider.
+
+This could be caused by an older version of package:provider; please make sure that you are using version >=5.0.0.''',
+          style: TextStyle(color: _BannerError.foreground),
+        ),
+      ],
+    );
+  }
+}
+
+class ShaderJankMessage {
+  const ShaderJankMessage(
+    this.screenId, {
+    @required this.jankyFramesCount,
+    @required this.jankDuration,
+  });
+
+  final String screenId;
+
+  final int jankyFramesCount;
+
+  final Duration jankDuration;
+
+  Widget build(BuildContext context) {
+    return _BannerError(
+      key: Key('ShaderJankMessage - $screenId'),
+      textSpans: [
+        TextSpan(
+          text: '''
+Shader compilation jank detected. $jankyFramesCount ${pluralize('frame', jankyFramesCount)} janked with a total of ${msText(jankDuration)} spent in shader compilation.
+
+To pre-compile shaders, see the instructions at ''',
+          style: const TextStyle(color: _BannerError.foreground),
+        ),
+        TextSpan(
+          text: preCompileShadersDocsUrl,
+          style: const TextStyle(
+            decoration: TextDecoration.underline,
+            color: _BannerError.linkColor,
+          ),
+          recognizer: TapGestureRecognizer()
+            ..onTap = () async {
+              await launchUrl(preCompileShadersDocsUrl, context);
             },
         ),
         const TextSpan(
@@ -304,7 +377,6 @@ class DebugModeMemoryMessage {
         const TextSpan(
           text: '''
 You are running your app in debug mode. Absolute memory usage may be higher in a debug build than in a release build.
-
 For the most accurate absolute memory stats, relaunch your application with the '--profile' argument, or ''',
           style: TextStyle(color: _BannerWarning.foreground),
         ),

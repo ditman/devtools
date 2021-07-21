@@ -6,9 +6,12 @@ import 'dart:convert';
 
 import 'package:meta/meta.dart';
 
+import '../charts/flame_chart.dart';
 import '../trace_event.dart';
 import '../trees.dart';
+import '../ui/search.dart';
 import '../utils.dart';
+import 'cpu_profile_transformer.dart';
 
 /// Data model for DevTools CPU profile.
 class CpuProfileData {
@@ -26,7 +29,7 @@ class CpuProfileData {
     );
   }
 
-  static CpuProfileData parse(Map<String, dynamic> json) {
+  factory CpuProfileData.parse(Map<String, dynamic> json) {
     return CpuProfileData._(
       stackFramesJson: jsonDecode(jsonEncode(json[stackFramesKey] ?? {})),
       stackTraceEvents:
@@ -45,7 +48,7 @@ class CpuProfileData {
     );
   }
 
-  static CpuProfileData subProfile(
+  factory CpuProfileData.subProfile(
     CpuProfileData superProfile,
     TimeRange subTimeRange,
   ) {
@@ -87,7 +90,7 @@ class CpuProfileData {
     );
   }
 
-  static CpuProfileData empty() => parse({});
+  factory CpuProfileData.empty() => CpuProfileData.parse({});
 
   // Key fields from the VM response JSON.
   static const nameKey = 'name';
@@ -106,6 +109,21 @@ class CpuProfileData {
   /// Marks whether this data has already been processed.
   bool processed = false;
 
+  List<CpuStackFrame> get callTreeRoots {
+    if (!processed) return <CpuStackFrame>[];
+    return _callTreeRoots ??= [_cpuProfileRoot.deepCopy()];
+  }
+
+  List<CpuStackFrame> _callTreeRoots;
+
+  List<CpuStackFrame> get bottomUpRoots {
+    if (!processed) return <CpuStackFrame>[];
+    return _bottomUpRoots ??=
+        BottomUpProfileTransformer.processData(_cpuProfileRoot);
+  }
+
+  List<CpuStackFrame> _bottomUpRoots;
+
   final Map<String, dynamic> stackFramesJson;
 
   /// Trace events associated with the last stackFrame in each sample (i.e. the
@@ -119,19 +137,71 @@ class CpuProfileData {
 
   CpuStackFrame get cpuProfileRoot => _cpuProfileRoot;
 
+  Iterable<String> get userTags => _cpuProfileRoot.userTags;
+
   CpuStackFrame _cpuProfileRoot;
 
   Map<String, CpuStackFrame> stackFrames = {};
 
   CpuStackFrame selectedStackFrame;
 
+  CpuProfileData dataForUserTag(String tag) {
+    if (!userTags.contains(tag)) {
+      return CpuProfileData.empty();
+    }
+
+    final stackTraceEventsForTag = stackTraceEvents
+        .where((traceEvent) => (traceEvent['args'] ?? {})['userTag'] == tag)
+        .toList();
+    assert(stackTraceEventsForTag.isNotEmpty);
+
+    final stackFramesForTagJson = <String, dynamic>{};
+    for (final trace in stackTraceEventsForTag) {
+      var currentId = trace[stackFrameIdKey];
+      var currentStackFrameJson = stackFramesJson[currentId];
+
+      while (currentStackFrameJson != null) {
+        stackFramesForTagJson[currentId] = currentStackFrameJson;
+        final parentId = currentStackFrameJson[parentIdKey];
+        final parentStackFrameJson =
+            parentId != null ? stackFramesJson[parentId] : null;
+        currentId = parentId;
+        currentStackFrameJson = parentStackFrameJson;
+      }
+    }
+
+    final originalTime = profileMetaData.time.duration;
+    final microsPerSample =
+        originalTime.inMicroseconds / profileMetaData.sampleCount;
+    final newSampleCount = stackTraceEventsForTag.length;
+    final metaData = profileMetaData.copyWith(
+      sampleCount: stackTraceEventsForTag.length,
+      // The start time is zero because only `TimeRange.duration` will matter
+      // for this profile data, and the samples included in this data could be
+      // sparse over the original profile's time range, so true start and end
+      // times wouldn't be helpful.
+      time: TimeRange()
+        ..start = const Duration()
+        ..end =
+            Duration(microseconds: (newSampleCount * microsPerSample).round()),
+    );
+
+    return CpuProfileData._(
+      stackFramesJson: stackFramesForTagJson,
+      stackTraceEvents: stackTraceEventsForTag,
+      profileMetaData: metaData,
+    );
+  }
+
   Map<String, dynamic> get json => {
         'type': '_CpuProfileTimeline',
         samplePeriodKey: profileMetaData.samplePeriod,
         sampleCountKey: profileMetaData.sampleCount,
         stackDepthKey: profileMetaData.stackDepth,
-        timeOriginKey: profileMetaData.time.start.inMicroseconds,
-        timeExtentKey: profileMetaData.time.duration.inMicroseconds,
+        if (profileMetaData?.time?.start != null)
+          timeOriginKey: profileMetaData.time.start.inMicroseconds,
+        if (profileMetaData?.time?.duration != null)
+          timeExtentKey: profileMetaData.time.duration.inMicroseconds,
         stackFramesKey: stackFramesJson,
         traceEventsKey: stackTraceEvents,
       };
@@ -154,9 +224,27 @@ class CpuProfileMetaData {
   final int stackDepth;
 
   final TimeRange time;
+
+  CpuProfileMetaData copyWith({
+    int sampleCount,
+    int samplePeriod,
+    int stackDepth,
+    TimeRange time,
+  }) {
+    return CpuProfileMetaData(
+      sampleCount: sampleCount ?? this.sampleCount,
+      samplePeriod: samplePeriod ?? this.samplePeriod,
+      stackDepth: stackDepth ?? this.stackDepth,
+      time: time ?? this.time,
+    );
+  }
 }
 
-class CpuStackFrame extends TreeNode<CpuStackFrame> {
+class CpuStackFrame extends TreeNode<CpuStackFrame>
+    with
+        DataSearchStateMixin,
+        TreeDataSearchStateMixin<CpuStackFrame>,
+        FlameChartDataMixin {
   CpuStackFrame({
     @required this.id,
     @required this.name,
@@ -174,6 +262,24 @@ class CpuStackFrame extends TreeNode<CpuStackFrame> {
   final String url;
 
   final CpuProfileMetaData profileMetaData;
+
+  Iterable<String> get userTags => _userTagSampleCount.keys;
+
+  /// Maps a user tag to the number of CPU samples associated with it.
+  ///
+  /// A single [CpuStackFrame] can have multiple tags because a single object
+  /// can be part of multiple samples.
+  final _userTagSampleCount = <String, int>{};
+
+  void incrementTagSampleCount(String userTag, {int increment = 1}) {
+    assert(userTag != null);
+    final currentCount = _userTagSampleCount.putIfAbsent(userTag, () => 0);
+    _userTagSampleCount[userTag] = currentCount + increment;
+
+    if (parent != null) {
+      parent.incrementTagSampleCount(userTag);
+    }
+  }
 
   /// How many cpu samples for which this frame is a leaf.
   int exclusiveSampleCount = 0;
@@ -209,6 +315,13 @@ class CpuStackFrame extends TreeNode<CpuStackFrame> {
 
   Duration _selfTime;
 
+  @override
+  String get tooltip => [
+        name,
+        msText(totalTime),
+        if (url != null) url,
+      ].join(' - ');
+
   /// Returns the number of cpu samples this stack frame is a part of.
   ///
   /// This will be equal to the number of leaf nodes under this stack frame.
@@ -221,6 +334,7 @@ class CpuStackFrame extends TreeNode<CpuStackFrame> {
     return _inclusiveSampleCount;
   }
 
+  @override
   CpuStackFrame shallowCopy({bool resetInclusiveSampleCount = false}) {
     final copy = CpuStackFrame(
       id: id,
@@ -232,6 +346,9 @@ class CpuStackFrame extends TreeNode<CpuStackFrame> {
       ..exclusiveSampleCount = exclusiveSampleCount
       ..inclusiveSampleCount =
           resetInclusiveSampleCount ? null : inclusiveSampleCount;
+    for (final entry in _userTagSampleCount.entries) {
+      copy.incrementTagSampleCount(entry.key, increment: entry.value);
+    }
     return copy;
   }
 
@@ -307,5 +424,58 @@ int stackFrameIdCompare(String a, String b) {
       error += 'ids [$a, $b]';
     }
     throw error;
+  }
+}
+
+class CpuProfileStore {
+  final _profiles = <TimeRange, CpuProfileData>{};
+
+  /// Lookup a profile from the cache [_profiles] for the given range [time].
+  ///
+  /// If [_profiles] contains a CPU profile for a time range that encompasses
+  /// [time], a sub profile will be generated, cached in [_profiles] and then
+  /// returned. This method will return null if no profiles are cached for
+  /// [time] or if a sub profile cannot be generated for [time].
+  CpuProfileData lookupProfile(TimeRange time) {
+    if (!time.isWellFormed) return null;
+
+    // If we have a profile for a time range encompassing [time], then we can
+    // generate and cache the profile for [time] without needing to pull data
+    // from the vm service.
+    _maybeGenerateSubProfile(time);
+    return _profiles[time];
+  }
+
+  void addProfile(TimeRange time, CpuProfileData profile) {
+    _profiles[time] = profile;
+  }
+
+  void _maybeGenerateSubProfile(TimeRange time) {
+    if (_profiles.containsKey(time)) return;
+    final encompassingTimeRange = _encompassingTimeRange(time);
+    if (encompassingTimeRange != null) {
+      final encompassingProfile = _profiles[encompassingTimeRange];
+
+      final subProfile = CpuProfileData.subProfile(encompassingProfile, time);
+      _profiles[time] = subProfile;
+    }
+  }
+
+  TimeRange _encompassingTimeRange(TimeRange time) {
+    int shortestDurationMicros = maxJsInt;
+    TimeRange encompassingTimeRange;
+    for (final t in _profiles.keys) {
+      // We want to find the shortest encompassing time range for [time].
+      if (t.containsRange(time) &&
+          t.duration.inMicroseconds < shortestDurationMicros) {
+        shortestDurationMicros = t.duration.inMicroseconds;
+        encompassingTimeRange = t;
+      }
+    }
+    return encompassingTimeRange;
+  }
+
+  void clear() {
+    _profiles.clear();
   }
 }

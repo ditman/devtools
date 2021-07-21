@@ -16,7 +16,8 @@ class ProfilerScreenController with CpuProfilerControllerProviderMixin {
   CpuProfileData get cpuProfileData => cpuProfilerController.dataNotifier.value;
 
   /// Notifies that a CPU profile is currently being recorded.
-  ValueListenable get recordingNotifier => _recordingNotifier;
+  ValueListenable<bool> get recordingNotifier => _recordingNotifier;
+
   final _recordingNotifier = ValueNotifier<bool>(false);
 
   final int _profileStartMicros = 0;
@@ -33,6 +34,18 @@ class ProfilerScreenController with CpuProfilerControllerProviderMixin {
       // Using [maxJsInt] as [extentMicros] for the getCpuProfile requests will
       // give us all cpu samples we have available
       extentMicros: maxJsInt,
+      processId: 'Profile $_profileStartMicros',
+    );
+  }
+
+  Future<void> loadAllSamples() async {
+    cpuProfilerController.reset();
+    await cpuProfilerController.pullAndProcessProfile(
+      startMicros: 0,
+      // Using [maxJsInt] as [extentMicros] for the getCpuProfile requests will
+      // give us all cpu samples we have available
+      extentMicros: maxJsInt,
+      processId: 'Load all samples',
     );
   }
 

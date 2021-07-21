@@ -24,7 +24,7 @@ void main() {
     setUp(() {
       mockServiceManager = MockServiceManager();
       when(mockServiceManager.service).thenReturn(null);
-      when(mockServiceManager.hasConnection).thenReturn(false);
+      when(mockServiceManager.connectedAppInitialized).thenReturn(false);
       when(mockServiceManager.connectedState).thenReturn(
           ValueNotifier<ConnectedState>(const ConnectedState(false)));
 
@@ -126,7 +126,7 @@ void main() {
         (WidgetTester tester) async {
       final mockConnectedApp = MockConnectedApp();
       when(mockConnectedApp.isFlutterAppNow).thenReturn(true);
-      when(mockServiceManager.hasConnection).thenReturn(true);
+      when(mockServiceManager.connectedAppInitialized).thenReturn(true);
       when(mockServiceManager.connectedApp).thenReturn(mockConnectedApp);
       final mockDebuggerController = MockDebuggerController();
       when(mockDebuggerController.isPaused)
@@ -150,7 +150,7 @@ void main() {
         (WidgetTester tester) async {
       final mockConnectedApp = MockConnectedApp();
       when(mockConnectedApp.isFlutterAppNow).thenReturn(true);
-      when(mockServiceManager.hasConnection).thenReturn(true);
+      when(mockServiceManager.connectedAppInitialized).thenReturn(true);
       when(mockServiceManager.connectedApp).thenReturn(mockConnectedApp);
       final mockDebuggerController = MockDebuggerController();
       when(mockDebuggerController.isPaused)
@@ -165,6 +165,7 @@ void main() {
               DebuggerScreen.id,
               debuggerScreenKey,
               tabKey: debuggerTabKey,
+              showFloatingDebuggerControls: false,
             ),
             screen2,
           ],
@@ -197,7 +198,7 @@ void main() {
     testWidgets(
         'does not display floating debugger tab controls when no app is connected',
         (WidgetTester tester) async {
-      when(mockServiceManager.hasConnection).thenReturn(false);
+      when(mockServiceManager.connectedAppInitialized).thenReturn(false);
       await tester.pumpWidget(wrap(
         DevToolsScaffold(
           tabs: const [screen1, screen2],
@@ -213,12 +214,17 @@ void main() {
 }
 
 class _TestScreen extends Screen {
-  const _TestScreen(this.name, this.key, {Key tabKey})
-      : super(
+  const _TestScreen(
+    this.name,
+    this.key, {
+    bool showFloatingDebuggerControls = true,
+    Key tabKey,
+  }) : super(
           name,
           title: name,
           icon: Icons.computer,
           tabKey: tabKey,
+          showFloatingDebuggerControls: showFloatingDebuggerControls,
         );
 
   final String name;

@@ -12,6 +12,7 @@ import 'globals.dart';
 import 'listenable.dart';
 import 'scaffold.dart';
 import 'theme.dart';
+import 'version.dart';
 
 /// Defines a page shown in the DevTools [TabBar].
 @immutable
@@ -26,6 +27,8 @@ abstract class Screen {
     this.requiresDebugBuild = false,
     this.requiresVmDeveloperMode = false,
     this.worksOffline = false,
+    this.shouldShowForFlutterVersion,
+    this.showFloatingDebuggerControls = true,
   });
 
   const Screen.conditional({
@@ -35,6 +38,8 @@ abstract class Screen {
     bool requiresDebugBuild = false,
     bool requiresVmDeveloperMode = false,
     bool worksOffline = false,
+    bool Function(FlutterVersion currentVersion) shouldShowForFlutterVersion,
+    bool showFloatingDebuggerControls = true,
     String title,
     IconData icon,
     Key tabKey,
@@ -45,10 +50,21 @@ abstract class Screen {
           requiresDebugBuild: requiresDebugBuild,
           requiresVmDeveloperMode: requiresVmDeveloperMode,
           worksOffline: worksOffline,
+          shouldShowForFlutterVersion: shouldShowForFlutterVersion,
+          showFloatingDebuggerControls: showFloatingDebuggerControls,
           title: title,
           icon: icon,
           tabKey: tabKey,
         );
+
+  /// Whether to show floating debugger controls if the app is paused.
+  ///
+  /// If your page is negatively impacted by the app being paused you should
+  /// show debugger controls.
+  final bool showFloatingDebuggerControls;
+
+  /// Whether to show the console for this screen.
+  bool showConsole(bool embed) => false;
 
   final String screenId;
 
@@ -83,6 +99,11 @@ abstract class Screen {
   /// Whether this screen works offline and should show in offline mode even if conditions are not met.
   final bool worksOffline;
 
+  /// A callback that will determine whether or not this screen should be
+  /// available for a given flutter version.
+  final bool Function(FlutterVersion currentFlutterVersion)
+      shouldShowForFlutterVersion;
+
   /// Whether this screen should display the isolate selector in the status
   /// line.
   ///
@@ -106,7 +127,7 @@ abstract class Screen {
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    return painter.width + defaultIconSize + denseSpacing * 2.0;
+    return painter.width + denseSpacing + defaultIconSize + defaultSpacing * 2;
   }
 
   /// Builds the tab to show for this screen in the [DevToolsScaffold]'s main
@@ -198,27 +219,37 @@ bool shouldShowScreen(Screen screen) {
   if (offlineMode) {
     return screen.worksOffline;
   }
+  // No sense in ever showing screens in non-offline mode unless the service
+  // is available. This also avoids odd edge cases where we could show screens
+  // while the ServiceManager is still initializing.
+  if (!serviceManager.isServiceAvailable ||
+      !serviceManager.connectedApp.connectedAppInitialized) return false;
+
   if (screen.requiresLibrary != null) {
-    if (!serviceManager.isServiceAvailable ||
-        !serviceManager.isolateManager.selectedIsolateAvailable.isCompleted ||
+    if (serviceManager.isolateManager.mainIsolate.value == null ||
         !serviceManager.libraryUriAvailableNow(screen.requiresLibrary)) {
       return false;
     }
   }
   if (screen.requiresDartVm) {
-    if (!serviceManager.isServiceAvailable ||
-        !serviceManager.connectedApp.isRunningOnDartVM) {
+    if (!serviceManager.connectedApp.isRunningOnDartVM) {
       return false;
     }
   }
   if (screen.requiresDebugBuild) {
-    if (!serviceManager.isServiceAvailable ||
-        serviceManager.connectedApp.isProfileBuildNow) {
+    if (serviceManager.connectedApp.isProfileBuildNow) {
       return false;
     }
   }
   if (screen.requiresVmDeveloperMode) {
     if (!preferences.vmDeveloperModeEnabled.value) {
+      return false;
+    }
+  }
+  if (screen.shouldShowForFlutterVersion != null) {
+    if (serviceManager.connectedApp.isFlutterAppNow &&
+        !screen.shouldShowForFlutterVersion(
+            serviceManager.connectedApp.flutterVersionNow)) {
       return false;
     }
   }

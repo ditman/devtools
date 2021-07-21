@@ -5,16 +5,14 @@
 import 'package:devtools_app/src/debugger/debugger_controller.dart';
 import 'package:devtools_app/src/globals.dart';
 import 'package:devtools_app/src/service_manager.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/mockito.dart';
-import 'package:test/test.dart';
 import 'package:vm_service/vm_service.dart';
 
 import 'support/mocks.dart';
 
 void main() {
   group('stdio', () {
-    DebuggerController debuggerController;
-
     setUp(() {
       final service = MockVmService();
       when(service.onDebugEvent).thenAnswer((_) {
@@ -34,28 +32,29 @@ void main() {
       });
       final manager = FakeServiceManager(service: service);
       setGlobal(ServiceConnectionManager, manager);
-      debuggerController = DebuggerController(initialSwitchToIsolate: false);
     });
 
     test('ignores trailing new lines', () {
-      debuggerController.appendStdio('1\n');
-      expect(debuggerController.stdio.value.length, 1);
+      serviceManager.consoleService.appendStdio('1\n');
+      expect(serviceManager.consoleService.stdio.value.length, 1);
     });
 
     test('has an item for each line', () {
-      debuggerController.appendStdio('1\n');
-      debuggerController.appendStdio('2\n');
-      debuggerController.appendStdio('3\n');
-      debuggerController.appendStdio('4\n');
-      expect(debuggerController.stdio.value.length, 4);
+      serviceManager.consoleService
+        ..appendStdio('1\n')
+        ..appendStdio('2\n')
+        ..appendStdio('3\n')
+        ..appendStdio('4\n');
+      expect(serviceManager.consoleService.stdio.value.length, 4);
     });
 
     test('preserves additional newlines', () {
-      debuggerController.appendStdio('1\n\n');
-      debuggerController.appendStdio('2\n\n');
-      debuggerController.appendStdio('3\n\n');
-      debuggerController.appendStdio('4\n\n');
-      expect(debuggerController.stdio.value.length, 8);
+      serviceManager.consoleService
+        ..appendStdio('1\n\n')
+        ..appendStdio('2\n\n')
+        ..appendStdio('3\n\n')
+        ..appendStdio('4\n\n');
+      expect(serviceManager.consoleService.stdio.value.length, 8);
     });
   });
 
@@ -73,7 +72,7 @@ void main() {
     test('initial values', () {
       expect(history.hasNext, false);
       expect(history.hasPrevious, false);
-      expect(history.currentScript, isNull);
+      expect(history.current.value, isNull);
       expect(history.hasScripts, false);
     });
 
@@ -84,19 +83,19 @@ void main() {
 
       expect(history.hasNext, false);
       expect(history.hasPrevious, true);
-      expect(history.currentScript, ref3);
+      expect(history.current.value, ref3);
 
       history.moveBack();
 
       expect(history.hasNext, true);
       expect(history.hasPrevious, true);
-      expect(history.currentScript, ref2);
+      expect(history.current.value, ref2);
 
       history.moveBack();
 
       expect(history.hasNext, true);
       expect(history.hasPrevious, false);
-      expect(history.currentScript, ref1);
+      expect(history.current.value, ref1);
     });
 
     test('moveBack', () {
@@ -105,19 +104,19 @@ void main() {
 
       expect(history.hasNext, false);
       expect(history.hasPrevious, true);
-      expect(history.currentScript, ref2);
+      expect(history.current.value, ref2);
 
       history.moveBack();
 
       expect(history.hasNext, true);
       expect(history.hasPrevious, false);
-      expect(history.currentScript, ref1);
+      expect(history.current.value, ref1);
 
       history.moveForward();
 
       expect(history.hasNext, false);
       expect(history.hasPrevious, true);
-      expect(history.currentScript, ref2);
+      expect(history.current.value, ref2);
     });
 
     test('openedScripts', () {
@@ -138,26 +137,26 @@ void main() {
       history.pushEntry(ref1);
       history.pushEntry(ref2);
 
-      expect(history.currentScript, ref2);
+      expect(history.current.value, ref2);
       history.moveBack();
-      expect(history.currentScript, ref1);
+      expect(history.current.value, ref1);
       history.moveBack();
-      expect(history.currentScript, ref2);
+      expect(history.current.value, ref2);
       history.moveBack();
-      expect(history.currentScript, ref1);
+      expect(history.current.value, ref1);
     });
 
     test('pushEntry removes next entries', () {
       history.pushEntry(ref1);
       history.pushEntry(ref2);
 
-      expect(history.currentScript, ref2);
+      expect(history.current.value, ref2);
       expect(history.hasNext, isFalse);
       history.moveBack();
-      expect(history.currentScript, ref1);
+      expect(history.current.value, ref1);
       expect(history.hasNext, isTrue);
       history.pushEntry(ref3);
-      expect(history.currentScript, ref3);
+      expect(history.current.value, ref3);
       expect(history.hasNext, isFalse);
     });
   });
@@ -254,4 +253,64 @@ void main() {
       expect(evalHistory.canNavigateDown, false);
     });
   });
+
+  group('search', () {
+    DebuggerController debuggerController;
+
+    setUp(() {
+      debuggerController = DebuggerController(initialSwitchToIsolate: false);
+      debuggerController.parsedScript.value = ParsedScript(
+        script: testScript,
+        highlighter: null,
+        executableLines: {},
+      );
+    });
+
+    test('matchesForSearch', () {
+      expect(
+        debuggerController.matchesForSearch('import').toString(),
+        equals('[0:0-6, 1:0-6, 2:0-6]'),
+      );
+      expect(
+        debuggerController.matchesForSearch('foo').toString(),
+        equals('[1:8-11, 2:8-11]'),
+      );
+      expect(
+        debuggerController.matchesForSearch('bar').toString(),
+        equals('[0:8-11, 2:11-14]'),
+      );
+      expect(
+        debuggerController.matchesForSearch('hello world').toString(),
+        equals('[5:28-39, 6:9-20]'),
+      );
+      expect(
+        debuggerController.matchesForSearch('').toString(),
+        equals('[]'),
+      );
+      expect(
+        debuggerController.matchesForSearch(null).toString(),
+        equals('[]'),
+      );
+    });
+  });
 }
+
+final testScript = Script(
+  source: '''
+import 'bar.dart';
+import 'foo.dart';
+import 'foobar.dart';
+
+void main() {
+  // This is a comment in a hello world app.
+  print('hello world');
+}
+''',
+  id: 'test-script',
+  uri: 'debugger/test/script.dart',
+  library: LibraryRef(
+    id: 'debugger-test-lib',
+    name: 'debugger-test',
+    uri: 'debugger/test',
+  ),
+);

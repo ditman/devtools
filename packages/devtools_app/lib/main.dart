@@ -3,10 +3,12 @@
 // found in the LICENSE file.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'src/analytics/stub_provider.dart'
     if (dart.library.html) 'src/analytics/remote_provider.dart';
 import 'src/app.dart';
+import 'src/app_error_handling.dart';
 import 'src/config_specific/framework_initialize/framework_initialize.dart';
 import 'src/config_specific/ide_theme/ide_theme.dart';
 import 'src/debugger/syntax_highlighter.dart';
@@ -14,10 +16,9 @@ import 'src/extension_points/extensions_base.dart';
 import 'src/extension_points/extensions_external.dart';
 import 'src/globals.dart';
 import 'src/preferences.dart';
+import 'src/provider/riverpod_error_logger_observer.dart';
 
 void main() async {
-  final ideTheme = getIdeTheme();
-
   // Initialize the framework before we do anything else, otherwise the
   // StorageController won't be initialized and preferences won't be loaded.
   await initializeFramework();
@@ -32,9 +33,15 @@ void main() async {
 
   // Set the extension points global.
   setGlobal(DevToolsExtensionPoints, ExternalDevToolsExtensionPoints());
+  setGlobal(IdeTheme, getIdeTheme());
 
-  // Now run the app.
-  runApp(
-    DevToolsApp(defaultScreens, ideTheme, await analyticsProvider),
-  );
+  setupErrorHandling(() async {
+    // Run the app.
+    runApp(
+      ProviderScope(
+        observers: const [ErrorLoggerObserver()],
+        child: DevToolsApp(defaultScreens, await analyticsProvider),
+      ),
+    );
+  });
 }

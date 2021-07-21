@@ -13,6 +13,7 @@ import 'package:pedantic/pedantic.dart';
 import '../auto_dispose_mixin.dart';
 import '../collapsible_mixin.dart';
 import '../common_widgets.dart';
+import '../debugger/debugger_controller.dart';
 import '../error_badge_manager.dart';
 import '../theme.dart';
 import '../ui/colors.dart';
@@ -32,12 +33,14 @@ class _InspectorTreeRowWidget extends StatefulWidget {
     this.error,
     @required this.scrollControllerX,
     @required this.viewportWidth,
+    @required this.debuggerController,
   }) : super(key: key);
 
   final _InspectorTreeState inspectorTreeState;
 
   InspectorTreeNode get node => row.node;
   final InspectorTreeRow row;
+  final DebuggerController debuggerController;
   final ScrollController scrollControllerX;
   final double viewportWidth;
 
@@ -66,6 +69,7 @@ class _InspectorTreeRowState extends State<_InspectorTreeRowWidget>
         onToggle: () {
           setExpanded(!isExpanded);
         },
+        debuggerController: widget.debuggerController,
       ),
     );
   }
@@ -183,11 +187,13 @@ class InspectorTree extends StatefulWidget {
   const InspectorTree({
     Key key,
     @required this.controller,
+    @required this.debuggerController,
     this.isSummaryTree = false,
     this.widgetErrors,
   }) : super(key: key);
 
   final InspectorTreeController controller;
+  final DebuggerController debuggerController;
   final bool isSummaryTree;
   final LinkedHashMap<String, InspectableWidgetError> widgetErrors;
 
@@ -469,6 +475,9 @@ class _InspectorTreeState extends State<InspectorTree>
                       itemExtent: rowHeight,
                       childrenDelegate: SliverChildBuilderDelegate(
                         (context, index) {
+                          if (index == controller.numRows) {
+                            return SizedBox(height: rowHeight);
+                          }
                           final InspectorTreeRow row =
                               controller.root?.getRow(index);
                           final inspectorRef =
@@ -483,9 +492,10 @@ class _InspectorTreeState extends State<InspectorTree>
                                     inspectorRef != null
                                 ? widget.widgetErrors[inspectorRef]
                                 : null,
+                            debuggerController: widget.debuggerController,
                           );
                         },
-                        childCount: controller.numRows,
+                        childCount: controller.numRows + 1,
                       ),
                       controller: _scrollControllerY,
                     ),
@@ -589,10 +599,12 @@ class InspectorRowContent extends StatelessWidget {
     this.error,
     @required this.scrollControllerX,
     @required this.viewportWidth,
+    @required this.debuggerController,
   });
 
   final InspectorTreeRow row;
   final InspectorTreeControllerFlutter controller;
+  final DebuggerController debuggerController;
   final VoidCallback onToggle;
   final Animation<double> expandArrowAnimation;
   final ScrollController scrollControllerX;
@@ -662,6 +674,7 @@ class InspectorRowContent extends StatelessWidget {
                     node.diagnostic,
                     isSelected: row.isSelected,
                     errorText: error?.errorMessage,
+                    debuggerController: debuggerController,
                   ),
                 ),
               ),

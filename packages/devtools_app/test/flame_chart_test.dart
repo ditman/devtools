@@ -4,18 +4,19 @@
 
 import 'package:devtools_app/src/charts/flame_chart.dart';
 import 'package:devtools_app/src/flutter_widgets/linked_scroll_controller.dart';
-import 'package:devtools_app/src/profiler/cpu_profile_controller.dart';
-import 'package:devtools_app/src/profiler/cpu_profile_model.dart';
-import 'package:devtools_app/src/profiler/cpu_profile_flame_chart.dart';
 import 'package:devtools_app/src/performance/performance_model.dart';
+import 'package:devtools_app/src/profiler/cpu_profile_controller.dart';
+import 'package:devtools_app/src/profiler/cpu_profile_flame_chart.dart';
+import 'package:devtools_app/src/profiler/cpu_profile_model.dart';
 import 'package:devtools_app/src/ui/colors.dart';
 import 'package:devtools_app/src/utils.dart';
 import 'package:devtools_testing/support/cpu_profile_test_data.dart';
-import 'package:devtools_testing/support/performance_test_data.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/performance_test_data.dart';
 
 void main() {
   const defaultZoom = 1.0;
@@ -32,7 +33,7 @@ void main() {
       selectionNotifier: ValueNotifier<CpuStackFrame>(null),
       searchMatchesNotifier: controller.searchMatches,
       activeSearchMatchNotifier: controller.activeSearchMatch,
-      onSelected: (_) {},
+      onDataSelected: (_) {},
     );
 
     Future<void> pumpFlameChart(WidgetTester tester) async {
@@ -158,25 +159,25 @@ void main() {
   group('ScrollingFlameChartRow', () {
     ScrollingFlameChartRow currentRow;
     final linkedScrollControllerGroup = LinkedScrollControllerGroup();
-    final testRow = ScrollingFlameChartRow(
+    final testRow = ScrollingFlameChartRow<TimelineEvent>(
       linkedScrollControllerGroup: linkedScrollControllerGroup,
       nodes: testNodes,
       width: 680.0, // 680.0 fits all test nodes and sideInsets of 70.0.
       startInset: sideInset,
-      selectionNotifier: ValueNotifier<CpuStackFrame>(null),
+      selectionNotifier: ValueNotifier<TimelineEvent>(null),
       searchMatchesNotifier: null,
       activeSearchMatchNotifier: null,
       onTapUp: () {},
       backgroundColor: Colors.transparent,
       zoom: FlameChart.minZoomLevel,
     );
-    final zoomedTestRow = ScrollingFlameChartRow(
+    final zoomedTestRow = ScrollingFlameChartRow<TimelineEvent>(
       linkedScrollControllerGroup: linkedScrollControllerGroup,
       nodes: testNodes,
       // 1080.0 fits all test nodes at zoom level 2.0 and sideInsets of 70.0.
       width: 1080.0,
       startInset: sideInset,
-      selectionNotifier: ValueNotifier<CpuStackFrame>(null),
+      selectionNotifier: ValueNotifier<TimelineEvent>(null),
       searchMatchesNotifier: null,
       activeSearchMatchNotifier: null,
       onTapUp: () {},
@@ -222,7 +223,7 @@ void main() {
     });
 
     testWidgets('builds for empty nodes list', (WidgetTester tester) async {
-      final emptyRow = ScrollingFlameChartRow(
+      final emptyRow = ScrollingFlameChartRow<CpuStackFrame>(
         linkedScrollControllerGroup: linkedScrollControllerGroup,
         nodes: const [],
         width: 500.0, // 500.0 is arbitrary.
@@ -450,7 +451,8 @@ void main() {
       expect(paddedZoomedIntervals[0], equals(const Range(0.0, 120.0)));
       expect(paddedZoomedIntervals[1], equals(const Range(120.0, 180.0)));
       expect(paddedZoomedIntervals[2], equals(const Range(180.0, 240.0)));
-      expect(paddedZoomedIntervals[3], equals(const Range(240.0, 10000540.0)));
+      expect(paddedZoomedIntervals[3],
+          equals(const Range(240.0, 1000000000540.0)));
     });
 
     test('toPaddedZoomedIntervals calculation is accurate for zoomed row', () {
@@ -462,7 +464,8 @@ void main() {
       expect(paddedZoomedIntervals[0], equals(const Range(0.0, 170.0)));
       expect(paddedZoomedIntervals[1], equals(const Range(170.0, 290.0)));
       expect(paddedZoomedIntervals[2], equals(const Range(290.0, 410.0)));
-      expect(paddedZoomedIntervals[3], equals(const Range(410.0, 10001010.0)));
+      expect(paddedZoomedIntervals[3],
+          equals(const Range(410.0, 1000000001010.0)));
     });
   });
 
@@ -502,7 +505,7 @@ void main() {
       expect(
           FlameChartUtils.rightPaddingForNode(3, testNodes,
               chartZoom: 1.0, chartStartInset: sideInset, chartWidth: 610.0),
-          equals(10000000.0));
+          equals(1000000000000.0));
     });
 
     test('leftPaddingForNode returns correct value for zoomed row', () {
@@ -540,7 +543,7 @@ void main() {
       expect(
           FlameChartUtils.rightPaddingForNode(3, testNodes,
               chartZoom: 2.0, chartStartInset: sideInset, chartWidth: 1080.0),
-          equals(10000000.0));
+          equals(1000000000000.0));
     });
 
     test('zoomForNode returns correct values', () {
@@ -554,7 +557,6 @@ const narrowNodeKey = Key('narrow node');
 final narrowNode = FlameChartNode<TimelineEvent>(
   key: narrowNodeKey,
   text: 'Narrow test node',
-  tooltip: 'Narrow test node tooltip',
   rect: const Rect.fromLTWH(23.0, 0.0, 21.9, rowHeight),
   backgroundColor: Colors.blue,
   textColor: Colors.white,
@@ -566,7 +568,6 @@ const Key testNodeKey = Key('test node');
 final testNode = FlameChartNode<TimelineEvent>(
   key: testNodeKey,
   text: 'Test node 1',
-  tooltip: 'Test node 1 tooltip',
   // 30.0 is the minimum node width for text.
   rect: const Rect.fromLTWH(70.0, 0.0, 30.0, rowHeight),
   backgroundColor: Colors.blue,
@@ -578,7 +579,6 @@ final testNode = FlameChartNode<TimelineEvent>(
 final testNode2 = FlameChartNode<TimelineEvent>(
   key: narrowNodeKey,
   text: 'Test node 2',
-  tooltip: 'Test node 2 tooltip',
   rect: const Rect.fromLTWH(120.0, 0.0, 50.0, rowHeight),
   backgroundColor: Colors.blue,
   textColor: Colors.white,
@@ -589,7 +589,6 @@ final testNode2 = FlameChartNode<TimelineEvent>(
 final testNode3 = FlameChartNode<TimelineEvent>(
   key: narrowNodeKey,
   text: 'Test node 3',
-  tooltip: 'Test node 3 tooltip',
   rect: const Rect.fromLTWH(180.0, 0.0, 50.0, rowHeight),
   backgroundColor: Colors.blue,
   textColor: Colors.white,
@@ -600,7 +599,6 @@ final testNode3 = FlameChartNode<TimelineEvent>(
 final testNode4 = FlameChartNode<TimelineEvent>(
   key: narrowNodeKey,
   text: 'Test node 4',
-  tooltip: 'Test node 4 tooltip',
   rect: const Rect.fromLTWH(240.0, 0.0, 300.0, rowHeight),
   backgroundColor: Colors.blue,
   textColor: Colors.white,
@@ -619,7 +617,6 @@ const noWidthNodeKey = Key('no-width node');
 final negativeWidthNode = FlameChartNode<TimelineEvent>(
   key: noWidthNodeKey,
   text: 'No-width node',
-  tooltip: 'no-width node tooltip',
   rect: const Rect.fromLTWH(1.0, 0.0, -0.1, rowHeight),
   backgroundColor: Colors.blue,
   textColor: Colors.white,

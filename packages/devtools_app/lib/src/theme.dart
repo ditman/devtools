@@ -16,15 +16,28 @@ const contrastForegroundWhite = _contrastForegroundWhite;
 ThemeData themeFor({
   @required bool isDarkTheme,
   @required IdeTheme ideTheme,
+  ThemeData theme,
 }) {
+  ThemeData colorTheme;
   // If the theme specifies a background color, use it to infer a theme.
   if (isValidDarkColor(ideTheme?.backgroundColor)) {
-    return _darkTheme(ideTheme);
+    colorTheme = _darkTheme(ideTheme);
   } else if (isValidLightColor(ideTheme?.backgroundColor)) {
-    return _lightTheme(ideTheme);
+    colorTheme = _lightTheme(ideTheme);
+  } else {
+    colorTheme = isDarkTheme ? _darkTheme(ideTheme) : _lightTheme(ideTheme);
   }
 
-  return isDarkTheme ? _darkTheme(ideTheme) : _lightTheme(ideTheme);
+  return colorTheme.copyWith(
+    primaryTextTheme: (theme != null
+            ? theme.primaryTextTheme.merge(colorTheme.primaryTextTheme)
+            : colorTheme.primaryTextTheme)
+        .apply(fontSizeFactor: ideTheme?.fontSizeFactor ?? 1.0),
+    textTheme: (theme != null
+            ? theme.textTheme.merge(colorTheme.textTheme)
+            : colorTheme.textTheme)
+        .apply(fontSizeFactor: ideTheme?.fontSizeFactor ?? 1.0),
+  );
 }
 
 ThemeData _darkTheme(IdeTheme ideTheme) {
@@ -72,6 +85,7 @@ ThemeData _baseTheme({
     // Same values for both light and dark themes.
     primaryColorDark: devtoolsBlue[700],
     primaryColorLight: devtoolsBlue[400],
+    // ignore: deprecated_member_use
     accentColor: devtoolsBlue[400],
     backgroundColor: devtoolsGrey[600],
     toggleableActiveColor: devtoolsBlue[400],
@@ -135,9 +149,11 @@ const actionsIconSize = 20.0;
 
 const defaultSpacing = 16.0;
 const denseSpacing = 8.0;
+const denseModeDenseSpacing = 2.0;
 const denseRowSpacing = 6.0;
 
 const defaultBorderRadius = 4.0;
+const defaultElevation = 4.0;
 
 const borderPadding = 2.0;
 const densePadding = 4.0;
@@ -156,6 +172,8 @@ const defaultScrollBarOffset = 10.0;
 const defaultTabBarViewPhysics = NeverScrollableScrollPhysics();
 
 const defaultDialogWidth = 700.0;
+
+const defaultFontSize = 14.0;
 
 /// Branded grey color.
 ///
@@ -189,6 +207,7 @@ const devtoolsWarning = Color(0xFFFDFAD5);
 
 extension DevToolsColorScheme on ColorScheme {
   bool get isLight => brightness == Brightness.light;
+
   bool get isDark => brightness == Brightness.dark;
 
   // Commonly used themed colors.
@@ -205,6 +224,14 @@ extension DevToolsColorScheme on ColorScheme {
   Color get contrastForeground =>
       isLight ? Colors.black : _contrastForegroundWhite;
 
+  Color get serviceExtensionButtonsTitle =>
+      isLight ? const Color(0xFF464646) : const Color(0xFFAEAEB1);
+
+  Color get serviceExtensionButtonsTitleSelected =>
+      isLight ? Colors.white : const Color(0xFF464646);
+
+  Color get serviceExtensionButtonsFillSelected => devtoolsBlue[400];
+
   Color get grey => isLight
       ? const Color.fromARGB(255, 128, 128, 128)
       : const Color.fromARGB(255, 128, 128, 128);
@@ -219,34 +246,51 @@ extension DevToolsColorScheme on ColorScheme {
 
   Color get devtoolsLink =>
       isLight ? const Color(0xFF1976D2) : Colors.lightBlueAccent;
+
   // TODO(jacobr): replace this with Theme.of(context).scaffoldBackgroundColor, but we use
   // this in places where we do not have access to the context.
   Color get defaultBackgroundColor =>
       isLight ? Colors.grey[50] : Colors.grey[850];
+
+  Color get alternatingBackgroundColor => isLight
+      ? defaultBackgroundColor.darken()
+      : defaultBackgroundColor.brighten();
+
   Color get chartAccentColor =>
       isLight ? const Color(0xFFCCCCCC) : const Color(0xFF585858);
+
   Color get chartTextColor => isLight ? Colors.black : Colors.white;
+
   Color get chartSubtleColor =>
       isLight ? const Color(0xFF999999) : const Color(0xFF8A8A8A);
+
   Color get toggleButtonBackgroundColor =>
       isLight ? const Color(0xFFE0EEFA) : const Color(0xFF2E3C48);
+
   // [toggleButtonForegroundColor] is the same for light and dark theme.
   Color get toggleButtonForegroundColor => const Color(0xFF2196F3);
 
   Color get functionSyntaxColor =>
       isLight ? const Color(0xFF795E26) : const Color(0xFFDCDCAA);
+
   Color get declarationsSyntaxColor =>
       isLight ? const Color(0xFF267f99) : const Color(0xFF4EC9B0);
+
   Color get modifierSyntaxColor =>
       isLight ? const Color(0xFF0000FF) : const Color(0xFF569CD6);
+
   Color get controlFlowSyntaxColor =>
       isLight ? const Color(0xFFAF00DB) : const Color(0xFFC586C0);
+
   Color get variableSyntaxColor =>
       isLight ? const Color(0xFF001080) : const Color(0xFF9CDCFE);
+
   Color get commentSyntaxColor =>
       isLight ? const Color(0xFF008000) : const Color(0xFF6A9955);
+
   Color get stringSyntaxColor =>
       isLight ? const Color(0xFFB20001) : const Color(0xFFD88E73);
+
   Color get numericConstantSyntaxColor =>
       isLight ? const Color(0xFF098658) : const Color(0xFFB5CEA8);
 
@@ -311,6 +355,7 @@ extension DevToolsColorScheme on ColorScheme {
 
   Color get expandedTopContentColor =>
       isLight ? Colors.grey[50] : Colors.grey[850];
+
   Color get expandedBottomContentColor =>
       isLight ? Colors.grey[200] : Colors.grey[800];
 
@@ -351,9 +396,15 @@ extension ThemeDataExtension on ThemeData {
   TextStyle get fixedFontStyle =>
       textTheme.bodyText2.copyWith(fontFamily: 'RobotoMono');
 
-  TextStyle get subtleFixedFontStyle {
-    return fixedFontStyle.copyWith(color: unselectedWidgetColor);
-  }
+  TextStyle get subtleFixedFontStyle =>
+      fixedFontStyle.copyWith(color: unselectedWidgetColor);
+
+  TextStyle get devToolsTitleStyle =>
+      textTheme.headline6.copyWith(color: Colors.white);
+
+  Color get titleSolidBackgroundColor => colorScheme.isLight
+      ? colorScheme.alternatingBackgroundColor
+      : canvasColor.darken(0.2);
 }
 
 TextStyle linkTextStyle(ColorScheme colorScheme) => TextStyle(
@@ -364,6 +415,8 @@ TextStyle linkTextStyle(ColorScheme colorScheme) => TextStyle(
 const wideSearchTextWidth = 400.0;
 const defaultSearchTextWidth = 200.0;
 const defaultTextFieldHeight = 32.0;
+
+const maxHoverCardHeight = 250.0;
 
 /// Default color of cursor and color used by search's TextField.
 /// Guarantee that the Search TextField on all platforms renders in the same
@@ -436,10 +489,26 @@ const defaultCurve = Curves.easeInOutCubic;
 CurvedAnimation defaultCurvedAnimation(AnimationController parent) =>
     CurvedAnimation(curve: defaultCurve, parent: parent);
 
-Color titleSolidBackgroundColor(ThemeData theme) {
-  return theme.canvasColor.darken(0.2);
-}
-
 const chartFontSizeSmall = 12.0;
 
 const lightSelection = Color(0xFFD4D7DA);
+
+bool includeText(BuildContext context, double includeTextWidth) {
+  return includeTextWidth == null ||
+      MediaQuery.of(context).size.width > includeTextWidth;
+}
+
+ButtonStyle denseAwareOutlinedButtonStyle(
+  BuildContext context,
+  double includeTextWidth,
+) {
+  var buttonStyle = Theme.of(context).outlinedButtonTheme.style;
+  if (!includeText(context, includeTextWidth)) {
+    buttonStyle = buttonStyle.copyWith(
+      padding: MaterialStateProperty.resolveWith<EdgeInsets>((_) {
+        return EdgeInsets.zero;
+      }),
+    );
+  }
+  return buttonStyle;
+}

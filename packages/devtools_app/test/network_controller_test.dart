@@ -10,7 +10,7 @@ import 'package:devtools_app/src/network/network_model.dart';
 import 'package:devtools_app/src/service_manager.dart';
 import 'package:devtools_app/src/ui/filter.dart';
 import 'package:devtools_app/src/version.dart';
-import 'package:test/test.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:vm_service/vm_service.dart';
 
 import 'support/mocks.dart';
@@ -153,6 +153,25 @@ void main() {
 
       // Search with incorrect case.
       expect(controller.matchesForSearch('YEAR').length, equals(5));
+    });
+
+    test('matchesForSearch sets isSearchMatch property', () async {
+      // The number of valid requests recorded in the test data.
+      const numRequests = 16;
+
+      final requestsNotifier = controller.requests;
+      // Refresh network data and ensure requests are populated.
+      await controller.networkService.refreshNetworkData();
+      final profile = requestsNotifier.value;
+      expect(profile.requests.length, numRequests);
+
+      var matches = controller.matchesForSearch('year=2019');
+      expect(matches.length, equals(5));
+      verifyIsSearchMatch(profile.requests, matches);
+
+      matches = controller.matchesForSearch('IPv6');
+      expect(matches.length, equals(2));
+      verifyIsSearchMatch(profile.requests, matches);
     });
 
     test('filterData', () async {

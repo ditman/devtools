@@ -13,7 +13,8 @@ import 'package:devtools_app/src/globals.dart';
 import 'package:devtools_app/src/service_extensions.dart' as extensions;
 import 'package:devtools_app/src/service_manager.dart';
 import 'package:devtools_app/src/service_registrations.dart' as registrations;
-import 'package:test/test.dart';
+import 'package:devtools_app/src/utils.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:vm_service/vm_service.dart';
 
 import 'support/flutter_test_environment.dart';
@@ -23,189 +24,193 @@ import 'support/flutter_test_environment.dart';
 const jsonRpcInvalidParamsCode = -32602;
 
 Future<void> runServiceManagerTests(FlutterTestEnvironment env) async {
-  group('ServiceConnectionManager', () {
-    tearDownAll(() async {
-      await env.tearDownEnvironment(force: true);
-    });
+  group(
+    'ServiceConnectionManager',
+    () {
+      tearDownAll(() async {
+        await env.tearDownEnvironment(force: true);
+      });
 
-    test('vmServiceOpened', () async {
-      await env.setupEnvironment();
+      test('vmServiceOpened', () async {
+        await env.setupEnvironment();
 
-      expect(serviceManager.service, equals(env.service));
-      expect(serviceManager.isolateManager, isNotNull);
-      expect(serviceManager.serviceExtensionManager, isNotNull);
-      expect(serviceManager.vmFlagManager, isNotNull);
-      expect(serviceManager.isolateManager.isolates, isNotEmpty);
-      expect(serviceManager.vmFlagManager.flags.value, isNotNull);
+        expect(serviceManager.service, equals(env.service));
+        expect(serviceManager.isolateManager, isNotNull);
+        expect(serviceManager.serviceExtensionManager, isNotNull);
+        expect(serviceManager.vmFlagManager, isNotNull);
+        expect(serviceManager.isolateManager.isolates.value, isNotEmpty);
+        expect(serviceManager.vmFlagManager.flags.value, isNotNull);
 
-      if (serviceManager.isolateManager.selectedIsolate == null) {
-        await serviceManager.isolateManager.onSelectedIsolateChanged
-            .firstWhere((ref) => ref != null);
-      }
+        if (serviceManager.isolateManager.selectedIsolate == null) {
+          await whenValueNonNull(serviceManager.isolateManager.selectedIsolate);
+        }
 
-      await env.tearDownEnvironment();
-    });
+        await env.tearDownEnvironment();
+      });
 
-    test('invalid setBreakpoint throws exception', () async {
-      await env.setupEnvironment();
+      test('invalid setBreakpoint throws exception', () async {
+        await env.setupEnvironment();
 
-      await expectLater(
-        serviceManager.service.addBreakpoint(
-            serviceManager.isolateManager.selectedIsolate.id,
-            'fake-script-id',
-            1),
-        throwsA(const TypeMatcher<RPCError>()
-            .having((e) => e.code, 'code', equals(jsonRpcInvalidParamsCode))),
-      );
+        await expectLater(
+          serviceManager.service.addBreakpoint(
+              serviceManager.isolateManager.selectedIsolate.value.id,
+              'fake-script-id',
+              1),
+          throwsA(const TypeMatcher<RPCError>()
+              .having((e) => e.code, 'code', equals(jsonRpcInvalidParamsCode))),
+        );
 
-      await env.tearDownEnvironment();
-    });
+        await env.tearDownEnvironment();
+      }, timeout: const Timeout.factor(4));
 
-    test('toggle boolean service extension', () async {
-      await env.setupEnvironment();
-      await serviceManager.service.allFuturesCompleted;
+      test('toggle boolean service extension', () async {
+        await env.setupEnvironment();
+        await serviceManager.service.allFuturesCompleted;
 
-      final extensionName = extensions.debugPaint.extension;
-      const evalExpression = 'debugPaintSizeEnabled';
-      final library = EvalOnDartLibrary(
-        [
+        final extensionName = extensions.debugPaint.extension;
+        const evalExpression = 'debugPaintSizeEnabled';
+        final library = EvalOnDartLibrary(
           'package:flutter/src/rendering/debug.dart',
-          'package:flutter_web/src/rendering/debug.dart',
-        ],
-        env.service,
-      );
+          env.service,
+        );
 
-      await _serviceExtensionAvailable(extensionName);
+        await _serviceExtensionAvailable(extensionName);
 
-      await _verifyExtensionStateOnTestDevice(evalExpression, 'false', library);
-      await _verifyInitialExtensionStateInServiceManager(extensionName);
+        await _verifyExtensionStateOnTestDevice(
+            evalExpression, 'false', library);
+        await _verifyInitialExtensionStateInServiceManager(extensionName);
 
-      // Enable the service extension via ServiceExtensionManager.
-      await serviceManager.serviceExtensionManager.setServiceExtensionState(
-        extensionName,
-        true,
-        true,
-      );
+        // Enable the service extension via ServiceExtensionManager.
+        await serviceManager.serviceExtensionManager.setServiceExtensionState(
+          extensionName,
+          true,
+          true,
+        );
 
-      await _verifyExtensionStateOnTestDevice(evalExpression, 'true', library);
-      await _verifyExtensionStateInServiceManager(extensionName, true, true);
+        await _verifyExtensionStateOnTestDevice(
+            evalExpression, 'true', library);
+        await _verifyExtensionStateInServiceManager(extensionName, true, true);
 
-      await env.tearDownEnvironment();
-    });
+        await env.tearDownEnvironment();
+      }, timeout: const Timeout.factor(4));
 
-    test('toggle String service extension', () async {
-      await env.setupEnvironment();
-      await serviceManager.service.allFuturesCompleted;
+      test('toggle String service extension', () async {
+        await env.setupEnvironment();
+        await serviceManager.service.allFuturesCompleted;
 
-      final extensionName = extensions.togglePlatformMode.extension;
-      await _serviceExtensionAvailable(extensionName);
-      const evalExpression = 'defaultTargetPlatform.toString()';
-      final library = EvalOnDartLibrary(
-        [
-          'package:flutter_web/src/foundation/platform.dart',
+        final extensionName = extensions.togglePlatformMode.extension;
+        await _serviceExtensionAvailable(extensionName);
+        const evalExpression = 'defaultTargetPlatform.toString()';
+        final library = EvalOnDartLibrary(
           'package:flutter/src/foundation/platform.dart',
-        ],
-        env.service,
+          env.service,
+        );
+
+        await _verifyExtensionStateOnTestDevice(
+          evalExpression,
+          'TargetPlatform.android',
+          library,
+        );
+        await _verifyExtensionStateInServiceManager(
+          extensionName,
+          true,
+          'android',
+        );
+
+        // Enable the service extension via ServiceExtensionManager.
+        await serviceManager.serviceExtensionManager.setServiceExtensionState(
+          extensionName,
+          true,
+          'iOS',
+        );
+
+        await _verifyExtensionStateOnTestDevice(
+          evalExpression,
+          'TargetPlatform.iOS',
+          library,
+        );
+        await _verifyExtensionStateInServiceManager(extensionName, true, 'iOS');
+
+        await env.tearDownEnvironment();
+      }, timeout: const Timeout.factor(4));
+
+      test(
+        'toggle numeric service extension',
+        () async {
+          await env.setupEnvironment();
+          await serviceManager.service.allFuturesCompleted;
+
+          final extensionName = extensions.slowAnimations.extension;
+          await _serviceExtensionAvailable(extensionName);
+          const evalExpression = 'timeDilation';
+          final library = EvalOnDartLibrary(
+            'package:flutter/src/scheduler/binding.dart',
+            env.service,
+          );
+
+          await _verifyExtensionStateOnTestDevice(
+              evalExpression, '1.0', library);
+          await _verifyInitialExtensionStateInServiceManager(extensionName);
+
+          // Enable the service extension via ServiceExtensionManager.
+          await serviceManager.serviceExtensionManager.setServiceExtensionState(
+            extensionName,
+            true,
+            5.0,
+          );
+
+          await _verifyExtensionStateOnTestDevice(
+              evalExpression, '5.0', library);
+          await _verifyExtensionStateInServiceManager(extensionName, true, 5.0);
+
+          await env.tearDownEnvironment();
+        },
+        timeout: const Timeout.factor(4),
       );
 
-      await _verifyExtensionStateOnTestDevice(
-        evalExpression,
-        'TargetPlatform.android',
-        library,
-      );
-      await _verifyExtensionStateInServiceManager(
-        extensionName,
-        true,
-        'android',
-      );
+      test(
+        'callService',
+        () async {
+          await env.setupEnvironment();
 
-      // Enable the service extension via ServiceExtensionManager.
-      await serviceManager.serviceExtensionManager.setServiceExtensionState(
-        extensionName,
-        true,
-        'iOS',
-      );
+          final registeredService = serviceManager.registeredMethodsForService[
+                  registrations.hotReload.service] ??
+              const [];
+          expect(registeredService, isNotEmpty);
 
-      await _verifyExtensionStateOnTestDevice(
-        evalExpression,
-        'TargetPlatform.iOS',
-        library,
-      );
-      await _verifyExtensionStateInServiceManager(extensionName, true, 'iOS');
+          await serviceManager.callService(
+            registrations.hotReload.service,
+            isolateId: serviceManager.isolateManager.mainIsolate.value.id,
+          );
 
-      await env.tearDownEnvironment();
-    });
-
-    test('toggle numeric service extension', () async {
-      await env.setupEnvironment();
-      await serviceManager.service.allFuturesCompleted;
-
-      final extensionName = extensions.slowAnimations.extension;
-      await _serviceExtensionAvailable(extensionName);
-      const evalExpression = 'timeDilation';
-      final library = EvalOnDartLibrary(
-        [
-          'package:flutter_web/src/scheduler/binding.dart',
-          'package:flutter/src/scheduler/binding.dart',
-        ],
-        env.service,
+          await env.tearDownEnvironment();
+        },
+        timeout: const Timeout.factor(4),
       );
 
-      await _verifyExtensionStateOnTestDevice(evalExpression, '1.0', library);
-      await _verifyInitialExtensionStateInServiceManager(extensionName);
+      test('callService throws exception', () async {
+        await env.setupEnvironment();
 
-      // Enable the service extension via ServiceExtensionManager.
-      await serviceManager.serviceExtensionManager.setServiceExtensionState(
-        extensionName,
-        true,
-        5.0,
-      );
+        // Service with 0 registrations.
+        await expectLater(
+            serviceManager.callService('fakeMethod'), throwsException);
 
-      await _verifyExtensionStateOnTestDevice(evalExpression, '5.0', library);
-      await _verifyExtensionStateInServiceManager(extensionName, true, 5.0);
+        await env.tearDownEnvironment();
+      }, timeout: const Timeout.factor(4));
 
-      await env.tearDownEnvironment();
-    });
+      test('hotReload', () async {
+        await env.setupEnvironment();
 
-    test('callService', () async {
-      await env.setupEnvironment();
+        await serviceManager.performHotReload();
 
-      final registeredService = serviceManager
-              .registeredMethodsForService[registrations.hotReload.service] ??
-          const [];
-      expect(registeredService, isNotEmpty);
+        await env.tearDownEnvironment();
+      }, timeout: const Timeout.factor(4));
 
-      await serviceManager.callService(
-        registrations.hotReload.service,
-        isolateId: serviceManager.isolateManager.selectedIsolate.id,
-      );
-
-      await env.tearDownEnvironment();
-    });
-
-    test('callService throws exception', () async {
-      await env.setupEnvironment();
-
-      // Service with 0 registrations.
-      await expectLater(
-          serviceManager.callService('fakeMethod'), throwsException);
-
-      await env.tearDownEnvironment();
-    });
-
-    test('hotReload', () async {
-      await env.setupEnvironment();
-
-      await serviceManager.performHotReload();
-
-      await env.tearDownEnvironment();
-    });
-
-    // TODO(kenz): once hot restart tests are fixed, add a hot restart test
-    // that verifies the state of service extensions after a hot restart.
-    // TODO(jacobr): uncomment out the hotRestart tests once
-    // https://github.com/flutter/devtools/issues/337 is fixed.
-    /*
+      // TODO(kenz): once hot restart tests are fixed, add a hot restart test
+      // that verifies the state of service extensions after a hot restart.
+      // TODO(jacobr): uncomment out the hotRestart tests once
+      // https://github.com/flutter/devtools/issues/337 is fixed.
+      /*
     test('hotRestart', () async {
       await env.setupEnvironment();
 
@@ -244,14 +249,15 @@ Future<void> runServiceManagerTests(FlutterTestEnvironment env) async {
     });
     */
 
-    test('getDisplayRefreshRate', () async {
-      await env.setupEnvironment();
+      test('getDisplayRefreshRate', () async {
+        await env.setupEnvironment();
 
-      expect(await serviceManager.queryDisplayRefreshRate, equals(60));
+        expect(await serviceManager.queryDisplayRefreshRate, equals(60));
 
-      await env.tearDownEnvironment();
-    });
-  }, timeout: const Timeout.factor(4));
+        await env.tearDownEnvironment();
+      }, timeout: const Timeout.factor(4));
+    },
+  );
 
   group('VmFlagManager', () {
     tearDownAll(() async {
@@ -266,7 +272,7 @@ Future<void> runServiceManagerTests(FlutterTestEnvironment env) async {
       expect(serviceManager.vmFlagManager.flags.value, isNotNull);
 
       await env.tearDownEnvironment();
-    });
+    }, timeout: const Timeout.factor(4));
 
     test('notifies on flag change', () async {
       await env.setupEnvironment();
@@ -286,17 +292,14 @@ Future<void> runServiceManagerTests(FlutterTestEnvironment env) async {
       expect(newFlags, isNot(equals(initialFlags)));
 
       await env.tearDownEnvironment();
-    });
-  }, timeout: const Timeout.factor(4));
+    }, timeout: const Timeout.factor(4));
+  });
 
   group('ServiceConnectionManager - restoring device-enabled extension', () {
     test('all extension types', () async {
       await env.setupEnvironment();
 
       final service = serviceManager.service;
-      final _flutterIsolateId =
-          serviceManager.isolateManager.mainIsolate.value.id;
-      expect(_flutterIsolateId, isNotNull);
 
       /// Helper method to call an extension on the test device and verify that
       /// the device reflects the new extension state.
@@ -324,7 +327,7 @@ Future<void> runServiceManagerTests(FlutterTestEnvironment env) async {
         // Enable service extension on test device.
         await service.callServiceExtension(
           extensionDescription.extension,
-          isolateId: _flutterIsolateId,
+          isolateId: serviceManager.isolateManager.mainIsolate.value.id,
           args: args,
         );
 
@@ -341,12 +344,9 @@ Future<void> runServiceManagerTests(FlutterTestEnvironment env) async {
       final boolArgs = {'enabled': true};
       const boolEvalExpression = 'debugPaintSizeEnabled';
       final boolLibrary = EvalOnDartLibrary(
-        [
-          'package:flutter/src/rendering/debug.dart',
-          'package:flutter_web/src/rendering/debug.dart',
-        ],
+        'package:flutter/src/rendering/debug.dart',
         service,
-        isolateId: _flutterIsolateId,
+        isolate: serviceManager.isolateManager.mainIsolate,
       );
 
       await _enableExtensionOnTestDevice(
@@ -361,12 +361,9 @@ Future<void> runServiceManagerTests(FlutterTestEnvironment env) async {
       final stringArgs = {'value': stringExtensionDescription.values[0]};
       const stringEvalExpression = 'defaultTargetPlatform.toString()';
       final stringLibrary = EvalOnDartLibrary(
-        [
-          'package:flutter/src/foundation/platform.dart',
-          'package:flutter_web/src/foundation/platform.dart',
-        ],
+        'package:flutter/src/foundation/platform.dart',
         service,
-        isolateId: _flutterIsolateId,
+        isolate: serviceManager.isolateManager.mainIsolate,
       );
       await _enableExtensionOnTestDevice(
         stringExtensionDescription,
@@ -386,12 +383,9 @@ Future<void> runServiceManagerTests(FlutterTestEnvironment env) async {
       };
       const numericEvalExpression = 'timeDilation';
       final numericLibrary = EvalOnDartLibrary(
-        [
-          'package:flutter/src/scheduler/binding.dart',
-          'package:flutter_web/src/scheduler/binding.dart',
-        ],
+        'package:flutter/src/scheduler/binding.dart',
         service,
-        isolateId: _flutterIsolateId,
+        isolate: serviceManager.isolateManager.mainIsolate,
       );
       await _enableExtensionOnTestDevice(
         numericExtensionDescription,
@@ -416,8 +410,8 @@ Future<void> runServiceManagerTests(FlutterTestEnvironment env) async {
         numericExtensionDescription.enabledValue,
       );
       await env.tearDownEnvironment();
-    });
-  }, timeout: const Timeout.factor(4));
+    }, timeout: const Timeout.factor(4));
+  });
 }
 
 // Returns a future that completes when the service extension is available.

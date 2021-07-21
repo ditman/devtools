@@ -162,10 +162,10 @@ class LoggingController extends DisposableController
         SearchControllerMixin<LogData>,
         FilterControllerMixin<LogData>,
         AutoDisposeControllerMixin {
-  LoggingController({this.inspectorService}) {
+  LoggingController() {
     autoDispose(
         serviceManager.onConnectionAvailable.listen(_handleConnectionStart));
-    if (serviceManager.hasConnection) {
+    if (serviceManager.connectedAppInitialized) {
       _handleConnectionStart(serviceManager.service);
     }
     autoDispose(
@@ -189,10 +189,6 @@ class LoggingController extends DisposableController
   ///
   /// See also [statusText].
   Stream get onLogStatusChanged => _logStatusController.stream;
-
-  /// This is specifiable in the constructor for testing.
-  @visibleForTesting
-  InspectorService inspectorService;
 
   List<LogData> data = <LogData>[];
 
@@ -222,8 +218,7 @@ class LoggingController extends DisposableController
     }
   }
 
-  /// ObjectGroup for Flutter (null for non-Flutter apps).
-  ObjectGroup objectGroup;
+  ObjectGroup get objectGroup => serviceManager.consoleService.objectGroup;
 
   String get statusText {
     final int totalCount = data.length;
@@ -275,18 +270,6 @@ class LoggingController extends DisposableController
     // Log Flutter extension events.
     autoDispose(
         service.onExtensionEventWithHistory.listen(_handleExtensionEvent));
-
-    if (inspectorService == null) {
-      await ensureInspectorServiceDependencies();
-
-      inspectorService = await InspectorService.create(service).catchError(
-          (e) => null,
-          test: (e) => e is FlutterInspectorLibraryNotFound);
-    }
-
-    if (inspectorService != null) {
-      objectGroup = inspectorService.createObjectGroup('console-group');
-    }
   }
 
   void _handleExtensionEvent(Event e) async {
@@ -630,6 +613,11 @@ class LoggingController extends DisposableController
           (log.details != null &&
               log.details.toLowerCase().contains(caseInsensitiveSearch))) {
         matches.add(log);
+        // TODO(kenz): use the value of this property in the logs table to
+        // improve performance. This will require some refactoring of FlatTable.
+        log.isSearchMatch = true;
+      } else {
+        log.isSearchMatch = false;
       }
     }
     return matches;
@@ -638,33 +626,38 @@ class LoggingController extends DisposableController
   @override
   void filterData(QueryFilter filter) {
     if (filter == null) {
-      filteredData.value = List.from(data);
+      filteredData
+        ..clear()
+        ..addAll(data);
     } else {
-      filteredData.value = data.where((log) {
-        final kindArg = filter.filterArguments[kindFilterId];
-        if (kindArg != null && !kindArg.matchesValue(log.kind.toLowerCase())) {
-          return false;
-        }
-
-        if (filter.substrings.isNotEmpty) {
-          for (final substring in filter.substrings) {
-            final caseInsensitiveSubstring = substring.toLowerCase();
-            final matchesKind = log.kind != null &&
-                log.kind.toLowerCase().contains(caseInsensitiveSubstring);
-            if (matchesKind) return true;
-
-            final matchesSummary = log.summary != null &&
-                log.summary.toLowerCase().contains(caseInsensitiveSubstring);
-            if (matchesSummary) return true;
-
-            final matchesDetails = log.details != null &&
-                log.summary.toLowerCase().contains(caseInsensitiveSubstring);
-            if (matchesDetails) return true;
+      filteredData
+        ..clear()
+        ..addAll(data.where((log) {
+          final kindArg = filter.filterArguments[kindFilterId];
+          if (kindArg != null &&
+              !kindArg.matchesValue(log.kind.toLowerCase())) {
+            return false;
           }
-          return false;
-        }
-        return true;
-      }).toList();
+
+          if (filter.substrings.isNotEmpty) {
+            for (final substring in filter.substrings) {
+              final caseInsensitiveSubstring = substring.toLowerCase();
+              final matchesKind = log.kind != null &&
+                  log.kind.toLowerCase().contains(caseInsensitiveSubstring);
+              if (matchesKind) return true;
+
+              final matchesSummary = log.summary != null &&
+                  log.summary.toLowerCase().contains(caseInsensitiveSubstring);
+              if (matchesSummary) return true;
+
+              final matchesDetails = log.details != null &&
+                  log.summary.toLowerCase().contains(caseInsensitiveSubstring);
+              if (matchesDetails) return true;
+            }
+            return false;
+          }
+          return true;
+        }).toList());
     }
     activeFilter.value = filter;
   }
@@ -764,7 +757,7 @@ String _valueAsString(InstanceRef ref) {
 /// case, this log entry will have a non-null `detailsComputer` field. After the
 /// data is calculated, the log entry will be modified to contain the calculated
 /// `details` data.
-class LogData {
+class LogData with DataSearchStateMixin {
   LogData(
     this.kind,
     this._details,

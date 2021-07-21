@@ -2,18 +2,26 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../auto_dispose_mixin.dart';
+import '../banner_messages.dart';
 import '../common_widgets.dart';
+import '../globals.dart';
+import '../scaffold.dart';
 import '../theme.dart';
 import '../ui/colors.dart';
 import '../utils.dart';
 import 'performance_controller.dart';
 import 'performance_model.dart';
+import 'performance_screen.dart';
+
+// Turn this flag on to see when flutter frames are linked with timeline events.
+bool debugFrames = false;
 
 class FlutterFramesChart extends StatefulWidget {
   const FlutterFramesChart(
@@ -77,11 +85,14 @@ class _FlutterFramesChartState extends State<FlutterFramesChart>
     _controller = newController;
 
     cancel();
+    _selectedFrame = _controller.selectedFrame.value;
     addAutoDisposeListener(_controller.selectedFrame, () {
       setState(() {
         _selectedFrame = _controller.selectedFrame.value;
       });
     });
+
+    _maybeShowShaderJankMessage();
   }
 
   @override
@@ -89,6 +100,29 @@ class _FlutterFramesChartState extends State<FlutterFramesChart>
     super.didUpdateWidget(oldWidget);
     if (scrollController.hasClients && scrollController.atScrollBottom) {
       scrollController.autoScrollToBottom();
+    }
+
+    if (!collectionEquals(oldWidget.frames, widget.frames)) {
+      _maybeShowShaderJankMessage();
+    }
+  }
+
+  void _maybeShowShaderJankMessage() {
+    final shaderJankFrames = widget.frames
+        .where((frame) => frame.hasShaderJank(widget.displayRefreshRate))
+        .toList();
+    if (shaderJankFrames.isNotEmpty) {
+      final Duration shaderJankDuration = shaderJankFrames.fold(
+        Duration.zero,
+        (prev, frame) => prev + frame.shaderDuration,
+      );
+      Provider.of<BannerMessagesController>(context).addMessage(
+        ShaderJankMessage(
+          offlineMode ? SimpleScreen.id : PerformanceScreen.id,
+          jankyFramesCount: shaderJankFrames.length,
+          jankDuration: shaderJankDuration,
+        ).build(context),
+      );
     }
   }
 
@@ -201,6 +235,8 @@ class _FlutterFramesChartState extends State<FlutterFramesChart>
         _legendItem('Frame Time (Raster)', mainRasterColor),
         const SizedBox(height: denseRowSpacing),
         _legendItem('Jank (slow frame)', uiJankColor),
+        const SizedBox(height: denseRowSpacing),
+        _legendItem('Shader Compilation', shaderCompilationColor),
       ],
     );
   }
@@ -226,7 +262,10 @@ class _FlutterFramesChartState extends State<FlutterFramesChart>
           sum +
           math.max(
             1000 / widget.displayRefreshRate,
-            math.max(frame.uiDurationMs, frame.rasterDurationMs),
+            math.max(
+              frame.buildTime.inMilliseconds,
+              frame.rasterTime.inMilliseconds,
+            ),
           ),
     );
     final avgFrameTime = sumFrameTimesMs / widget.frames.length;
@@ -268,27 +307,64 @@ class FlutterFramesChartItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    final bool janky = frame.isJanky(displayRefreshRate);
+    final bool uiJanky = frame.isUiJanky(displayRefreshRate);
+    final bool rasterJanky = frame.isRasterJanky(displayRefreshRate);
+    final bool hasShaderJank = frame.hasShaderJank(displayRefreshRate);
+
+    var uiColor = uiJanky ? uiJankColor : mainUiColor;
+    var rasterColor = rasterJanky ? rasterJankColor : mainRasterColor;
+    var shaderColor = shaderCompilationColor;
+
+    if (debugFrames) {
+      if (frame.timelineEventData.uiEvent == null) {
+        uiColor = uiColor.darken(.5);
+      }
+      if (frame.timelineEventData.rasterEvent == null) {
+        rasterColor = rasterColor.darken(.5);
+        shaderColor = shaderColor.darken(.5);
+      }
+    }
+
     // TODO(kenz): add some indicator when a frame is so janky that it exceeds the
     // available axis space.
     final ui = Container(
       key: Key('frame ${frame.id} - ui'),
       width: defaultFrameWidth / 2,
-      height: (frame.uiDurationMs / msPerPx).clamp(0.0, availableChartHeight),
-      color: janky ? uiJankColor : mainUiColor,
+      height: (frame.buildTime.inMilliseconds / msPerPx)
+          .clamp(0.0, availableChartHeight),
+      color: uiColor,
     );
-    final raster = Container(
-      key: Key('frame ${frame.id} - raster'),
-      width: defaultFrameWidth / 2,
-      height:
-          (frame.rasterDurationMs / msPerPx).clamp(0.0, availableChartHeight),
-      color: janky ? rasterJankColor : mainRasterColor,
+
+    final shaderToRasterRatio =
+        frame.shaderDuration.inMilliseconds / frame.rasterTime.inMilliseconds;
+
+    final raster = Column(
+      children: [
+        Container(
+          key: Key('frame ${frame.id} - raster'),
+          width: defaultFrameWidth / 2,
+          height: ((frame.rasterTime.inMilliseconds -
+                      frame.shaderDuration.inMilliseconds) /
+                  msPerPx)
+              .clamp(0.0, availableChartHeight * (1 - shaderToRasterRatio)),
+          color: rasterColor,
+        ),
+        if (frame.hasShaderTime)
+          Container(
+            key: Key('frame ${frame.id} - shaders'),
+            width: defaultFrameWidth / 2,
+            height: (frame.shaderDuration.inMilliseconds / msPerPx)
+                .clamp(0.0, availableChartHeight * shaderToRasterRatio),
+            color: shaderColor,
+          ),
+      ],
     );
+
     return Stack(
       children: [
         // TODO(kenz): make tooltip to persist if the frame is selected.
         DevToolsTooltip(
-          tooltip: _tooltipText(frame),
+          tooltip: _tooltipText(frame, hasShaderJank),
           padding: const EdgeInsets.all(denseSpacing),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: densePadding),
@@ -314,13 +390,73 @@ class FlutterFramesChartItem extends StatelessWidget {
             color: defaultSelectionColor,
             height: selectedIndicatorHeight,
           ),
+        if (hasShaderJank)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              ShaderJankWarningIcon(),
+            ],
+          ),
       ],
     );
   }
 
-  String _tooltipText(FlutterFrame frame) {
-    return 'UI: ${msText(frame.uiEventFlow.time.duration)}\n'
-        'Raster: ${msText(frame.rasterEventFlow.time.duration)}';
+  // TODO(kenz): Support a rich tooltip
+  // https://github.com/flutter/devtools/issues/3139
+  String _tooltipText(FlutterFrame frame, bool hasShaderJank) {
+    return [
+      'UI: ${msText(frame.buildTime)}',
+      'Raster: ${msText(frame.rasterTime)}',
+      if (hasShaderJank) 'Shader Compilation: ${msText(frame.shaderDuration)}',
+    ].join('\n');
+  }
+}
+
+class ShaderJankWarningIcon extends StatefulWidget {
+  const ShaderJankWarningIcon({Key key}) : super(key: key);
+
+  @override
+  State<ShaderJankWarningIcon> createState() => _ShaderJankWarningIconState();
+}
+
+class _ShaderJankWarningIconState extends State<ShaderJankWarningIcon> {
+  Timer timer;
+
+  bool showFirst;
+
+  @override
+  void initState() {
+    super.initState();
+    showFirst = true;
+    timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        showFirst = !showFirst;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedCrossFade(
+      duration: const Duration(seconds: 1),
+      firstChild: _warningIcon(),
+      secondChild: _warningIcon(color: Colors.amber),
+      crossFadeState:
+          showFirst ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+    );
+  }
+
+  Widget _warningIcon({Color color}) {
+    return Icon(
+      Icons.warning_amber_rounded,
+      color: color,
+    );
   }
 }
 

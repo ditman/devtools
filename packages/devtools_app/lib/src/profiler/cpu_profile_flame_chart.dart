@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import '../charts/flame_chart.dart';
 import '../ui/colors.dart';
-import '../utils.dart';
 import 'cpu_profile_controller.dart';
 import 'cpu_profile_model.dart';
 
@@ -19,7 +18,7 @@ class CpuProfileFlameChart extends FlameChart<CpuProfileData, CpuStackFrame> {
     @required ValueListenable<CpuStackFrame> selectionNotifier,
     @required ValueListenable<List<CpuStackFrame>> searchMatchesNotifier,
     @required ValueListenable<CpuStackFrame> activeSearchMatchNotifier,
-    @required Function(CpuStackFrame stackFrame) onSelected,
+    @required Function(CpuStackFrame stackFrame) onDataSelected,
   }) : super(
           data,
           time: data.profileMetaData.time,
@@ -30,7 +29,7 @@ class CpuProfileFlameChart extends FlameChart<CpuProfileData, CpuStackFrame> {
           selectionNotifier: selectionNotifier,
           searchMatchesNotifier: searchMatchesNotifier,
           activeSearchMatchNotifier: activeSearchMatchNotifier,
-          onSelected: onSelected,
+          onDataSelected: onDataSelected,
         );
 
   final CpuProfilerController controller;
@@ -64,12 +63,11 @@ class _CpuProfileFlameChartState
       final node = FlameChartNode<CpuStackFrame>(
         key: Key('${stackFrame.id}'),
         text: stackFrame.name,
-        tooltip: '${stackFrame.name} - ${msText(stackFrame.totalTime)}',
         rect: Rect.fromLTWH(left, flameChartNodeTop, width, rowHeight),
         backgroundColor: backgroundColor,
         textColor: Colors.black,
         data: stackFrame,
-        onSelected: (dynamic frame) => widget.onSelected(frame),
+        onSelected: (CpuStackFrame frame) => widget.onDataSelected(frame),
       )..sectionIndex = 0;
 
       rows[row].addNode(node);
@@ -88,11 +86,10 @@ class _CpuProfileFlameChartState
     BuildContext buildContext,
   ) {
     final colorScheme = Theme.of(context).colorScheme;
-    final zoom = zoomController.value;
     return [
       CustomPaint(
         painter: TimelineGridPainter(
-          zoom: zoom,
+          zoom: currentZoom,
           constraints: constraints,
           verticalScrollOffset: verticalScrollOffset,
           horizontalScrollOffset: horizontalScrollOffset,
@@ -131,7 +128,7 @@ class _CpuProfileFlameChartState
   @override
   double startXForData(CpuStackFrame data) {
     final x = stackFrameLefts[data.id] - widget.startInset;
-    return x * zoomController.value;
+    return x * currentZoom;
   }
 
   double startingLeftForStackFrame(CpuStackFrame stackFrame) {

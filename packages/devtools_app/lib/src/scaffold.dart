@@ -19,15 +19,18 @@ import 'common_widgets.dart';
 import 'config_specific/drag_and_drop/drag_and_drop.dart';
 import 'config_specific/ide_theme/ide_theme.dart';
 import 'config_specific/import_export/import_export.dart';
+import 'debugger/console.dart';
 import 'debugger/debugger_screen.dart';
 import 'framework_controller.dart';
 import 'globals.dart';
 import 'notifications.dart';
 import 'routing.dart';
 import 'screen.dart';
+import 'split.dart';
 import 'status_line.dart';
 import 'theme.dart';
 import 'title.dart';
+import 'utils.dart';
 
 /// Scaffolding for a screen and navigation in the DevTools App.
 ///
@@ -70,11 +73,19 @@ class DevToolsScaffold extends StatefulWidget {
   /// The size that all actions on this widget are expected to have.
   static const double actionWidgetSize = 48.0;
 
+  /// The border around the content in the DevTools UI.
+  EdgeInsets get appPadding => EdgeInsets.fromLTRB(
+        horizontalPadding.left,
+        isEmbedded() ? 2.0 : 16.0,
+        horizontalPadding.right,
+        0.0,
+      );
+
   // Note: when changing this value, also update `flameChartContainerOffset`
   // from flame_chart.dart.
-  /// The border around the content in the DevTools UI.
-  static const EdgeInsets appPadding =
-      EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 8.0);
+  /// Horizontal padding around the content in the DevTools UI.
+  static EdgeInsets get horizontalPadding =>
+      EdgeInsets.symmetric(horizontal: isEmbedded() ? 2.0 : 16.0);
 
   /// All of the [Screen]s that it's possible to navigate to from this Scaffold.
   final List<Screen> tabs;
@@ -266,6 +277,8 @@ class DevToolsScaffoldState extends State<DevToolsScaffold>
 
   /// Pushes the snapshot screen for an offline import.
   void _pushSnapshotScreenForImport(String screenId) {
+    // TODO(kenz): for 'performance' imports, load the legacy screen or the new
+    // screen based on the flutter version of the imported file.
     final args = {'screen': screenId};
     final routerDelegate = DevToolsRouterDelegate.of(context);
     // If we are already in offline mode, we need to replace the existing page
@@ -291,7 +304,7 @@ class DevToolsScaffoldState extends State<DevToolsScaffold>
           // TODO(kenz): this padding creates a flash when dragging and dropping
           // into the app size screen because it creates space that is outside
           // of the [DragAndDropEventAbsorber] widget. Fix this.
-          padding: DevToolsScaffold.appPadding,
+          padding: widget.appPadding,
           alignment: Alignment.topLeft,
           child: FocusScope(
             child: AnalyticsPrompt(
@@ -304,6 +317,22 @@ class DevToolsScaffoldState extends State<DevToolsScaffold>
         ),
     ];
 
+    final content = Stack(
+      children: [
+        TabBarView(
+          physics: defaultTabBarViewPhysics,
+          controller: _tabController,
+          children: tabBodies,
+        ),
+        if (serviceManager.connectedAppInitialized &&
+            !offlineMode &&
+            _currentScreen.showFloatingDebuggerControls)
+          Container(
+            alignment: Alignment.topCenter,
+            child: FloatingDebuggerControls(),
+          ),
+      ],
+    );
     final theme = Theme.of(context);
     return Provider<BannerMessagesController>(
       create: (_) => BannerMessagesController(),
@@ -321,22 +350,21 @@ class DevToolsScaffoldState extends State<DevToolsScaffold>
               color: theme.primaryColor,
               child: Scaffold(
                 appBar: widget.embed ? null : _buildAppBar(scaffoldTitle),
-                body: Stack(
-                  children: [
-                    TabBarView(
-                      physics: defaultTabBarViewPhysics,
-                      controller: _tabController,
-                      children: tabBodies,
-                    ),
-                    if (serviceManager.hasConnection &&
+                body: (serviceManager.connectedAppInitialized &&
                         !offlineMode &&
-                        _currentScreen.screenId != DebuggerScreen.id)
-                      Container(
-                        alignment: Alignment.topCenter,
-                        child: FloatingDebuggerControls(),
-                      ),
-                  ],
-                ),
+                        _currentScreen.showConsole(widget.embed))
+                    ? Split(
+                        axis: Axis.vertical,
+                        children: [
+                          content,
+                          Padding(
+                            padding: DevToolsScaffold.horizontalPadding,
+                            child: const DebuggerConsole(),
+                          ),
+                        ],
+                        initialFractions: const [0.8, 0.2],
+                      )
+                    : content,
                 bottomNavigationBar: widget.embed ? null : _buildStatusLine(),
               ),
             ),
@@ -398,7 +426,7 @@ class DevToolsScaffoldState extends State<DevToolsScaffold>
       automaticallyImplyLeading: false,
       title: Text(
         title,
-        style: Theme.of(context).textTheme.headline6,
+        style: Theme.of(context).devToolsTitleStyle,
       ),
       centerTitle: false,
       toolbarHeight: defaultToolbarHeight,
@@ -423,7 +451,7 @@ class DevToolsScaffoldState extends State<DevToolsScaffold>
   }
 
   Widget _buildStatusLine() {
-    const appPadding = DevToolsScaffold.appPadding;
+    final appPadding = widget.appPadding;
 
     return Container(
       height: 48.0,
@@ -449,10 +477,34 @@ class DevToolsScaffoldState extends State<DevToolsScaffold>
       offlineMode = true;
     });
   }
+
+  /// Returns the width of the scaffold title, tabs and default icons.
+  double _wideWidth(String title, DevToolsScaffold widget) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: title,
+        style: Theme.of(context).textTheme.headline6,
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    // Approximate size of the title. Add [defaultSpacing] to account for
+    // title's leading padding.
+    double wideWidth = painter.width + defaultSpacing;
+    for (var tab in widget.tabs) {
+      wideWidth += tab.approximateWidth();
+    }
+    wideWidth +=
+        (widget.actions?.length ?? 0) * DevToolsScaffold.actionWidgetSize;
+    return wideWidth;
+  }
 }
 
 class SimpleScreen extends Screen {
-  const SimpleScreen(this.child) : super(id);
+  const SimpleScreen(this.child)
+      : super(
+          id,
+          showFloatingDebuggerControls: false,
+        );
 
   static const id = 'simple';
 
@@ -462,20 +514,4 @@ class SimpleScreen extends Screen {
   Widget build(BuildContext context) {
     return child;
   }
-}
-
-/// Returns the width of the scaffold title, tabs and default icons.
-double _wideWidth(String title, DevToolsScaffold widget) {
-  final painter = TextPainter(
-    text: TextSpan(
-      text: title,
-    ),
-    textDirection: TextDirection.ltr,
-  )..layout();
-  // Approximate size of title and default icons.
-  double wideWidth = painter.width + 300;
-  for (var tab in widget.tabs) {
-    wideWidth += tab.approximateWidth();
-  }
-  return wideWidth;
 }

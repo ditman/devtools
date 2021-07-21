@@ -7,6 +7,7 @@ import 'dart:convert';
 import '../../../devtools.dart';
 import '../../globals.dart';
 import '../../notifications.dart';
+import '../../performance/legacy/performance_screen.dart';
 import '../../performance/performance_model.dart';
 import '../../performance/performance_screen.dart';
 import '../../utils.dart';
@@ -17,6 +18,7 @@ import '_export_stub.dart'
 const devToolsSnapshotKey = 'devToolsSnapshot';
 const activeScreenIdKey = 'activeScreenId';
 const devToolsVersionKey = 'devtoolsVersion';
+const flutterVersionKey = 'flutterVersion';
 const nonDevToolsFileMessage = 'The imported file is not a Dart DevTools file.'
     ' At this time, DevTools only supports importing files that were originally'
     ' exported from DevTools.';
@@ -98,11 +100,15 @@ abstract class ExportController {
       devToolsSnapshotKey: true,
       activeScreenIdKey: activeScreenId,
       devToolsVersionKey: version,
+      if (serviceManager.connectedApp.flutterVersionNow != null)
+        flutterVersionKey:
+            serviceManager.connectedApp.flutterVersionNow.version,
     };
     // This is a workaround to guarantee that DevTools exports are compatible
     // with other trace viewers (catapult, perfetto, chrome://tracing), which
     // require a top level field named "traceEvents".
-    if (activeScreenId == PerformanceScreen.id) {
+    if (activeScreenId == PerformanceScreen.id ||
+        activeScreenId == LegacyPerformanceScreen.id) {
       final traceEvents = List<Map<String, dynamic>>.from(
           contents[PerformanceData.traceEventsKey]);
       _contents[PerformanceData.traceEventsKey] = traceEvents;

@@ -60,7 +60,7 @@ TextStyle primaryColor(TextStyle style, BuildContext context) {
   return style.copyWith(
     color: (theme.brightness == Brightness.light)
         ? theme.primaryColor
-        : theme.accentColor,
+        : theme.colorScheme.secondary,
     fontWeight: FontWeight.w400,
   );
 }
@@ -89,6 +89,7 @@ class IconLabelButton extends StatelessWidget {
     @required this.icon,
     @required this.label,
     @required this.onPressed,
+    this.color,
     this.includeTextWidth,
     this.elevatedButton = false,
   }) : super(key: key);
@@ -101,6 +102,8 @@ class IconLabelButton extends StatelessWidget {
 
   final VoidCallback onPressed;
 
+  final Color color;
+
   /// Whether this icon label button should use an elevated button style.
   final bool elevatedButton;
 
@@ -110,6 +113,7 @@ class IconLabelButton extends StatelessWidget {
       label: label,
       iconData: icon,
       includeTextWidth: includeTextWidth,
+      color: color,
     );
     if (elevatedButton) {
       return ElevatedButton(
@@ -121,7 +125,9 @@ class IconLabelButton extends StatelessWidget {
     // https://github.com/flutter/flutter/issues/79894 is fixed.
     return SizedBox(
       height: defaultButtonHeight,
+      width: !includeText(context, includeTextWidth) ? buttonMinWidth : null,
       child: OutlinedButton(
+        style: denseAwareOutlinedButtonStyle(context, includeTextWidth),
         onPressed: onPressed,
         child: iconLabel,
       ),
@@ -174,12 +180,13 @@ class ClearButton extends IconLabelButton {
 class RefreshButton extends IconLabelButton {
   const RefreshButton({
     Key key,
+    String label = 'Refresh',
     double includeTextWidth,
     @required VoidCallback onPressed,
   }) : super(
           key: key,
           icon: Icons.refresh,
-          label: 'Refresh',
+          label: label,
           includeTextWidth: includeTextWidth,
           onPressed: onPressed,
         );
@@ -254,30 +261,24 @@ class StopRecordingButton extends StatelessWidget {
 class SettingsOutlinedButton extends StatelessWidget {
   const SettingsOutlinedButton({
     @required this.onPressed,
-    @required this.tooltip,
+    @required this.label,
   });
 
   final VoidCallback onPressed;
 
-  final String tooltip;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      // TODO(kenz): this height should be unnecessary once
-      // https://github.com/flutter/flutter/issues/79894 is fixed.
-      height: defaultButtonHeight,
-      width: defaultButtonHeight, // This will result in a square button.
-      child: DevToolsTooltip(
-        tooltip: tooltip,
-        child: OutlinedButton(
-          onPressed: onPressed,
-          child: const Icon(
-            Icons.settings,
-            size: defaultIconSize,
-          ),
-        ),
-      ),
+    return IconLabelButton(
+      onPressed: onPressed,
+      icon: Icons.settings,
+      label: label,
+      // TODO(jacobr): consider a more conservative min-width. To minimize the
+      // impact on the existing UI and deal with the fact that some of the
+      // existing label names are fairly verbose, we set a width that will
+      // never be hit.
+      includeTextWidth: 20000,
     );
   }
 }
@@ -529,14 +530,14 @@ class BulletSpacer extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
 
-    TextTheme textTheme;
+    TextStyle textStyle;
     if (useAccentColor) {
-      textTheme = theme.appBarTheme.textTheme ?? theme.primaryTextTheme;
+      textStyle = theme.appBarTheme.toolbarTextStyle ??
+          theme.primaryTextTheme.bodyText2;
     } else {
-      textTheme = theme.textTheme;
+      textStyle = theme.textTheme.bodyText2;
     }
 
-    final textStyle = textTheme.bodyText2;
     final mutedColor = textStyle?.color?.withAlpha(0x90);
 
     return Container(
@@ -654,19 +655,23 @@ class AreaPaneHeader extends StatelessWidget implements PreferredSizeWidget {
   const AreaPaneHeader({
     Key key,
     @required this.title,
+    this.maxLines = 1,
     this.needsTopBorder = true,
     this.needsBottomBorder = true,
     this.needsLeftBorder = false,
-    this.actions = const [],
+    this.leftActions = const [],
+    this.rightActions = const [],
     this.rightPadding = densePadding,
     this.tall = false,
   }) : super(key: key);
 
   final Widget title;
+  final int maxLines;
   final bool needsTopBorder;
   final bool needsBottomBorder;
   final bool needsLeftBorder;
-  final List<Widget> actions;
+  final List<Widget> leftActions;
+  final List<Widget> rightActions;
   final double rightPadding;
   final bool tall;
 
@@ -683,21 +688,21 @@ class AreaPaneHeader extends StatelessWidget implements PreferredSizeWidget {
                 needsBottomBorder ? defaultBorderSide(theme) : BorderSide.none,
             left: needsLeftBorder ? defaultBorderSide(theme) : BorderSide.none,
           ),
-          color: titleSolidBackgroundColor(theme),
+          color: theme.titleSolidBackgroundColor,
         ),
         padding: EdgeInsets.only(left: defaultSpacing, right: rightPadding),
         alignment: Alignment.centerLeft,
         child: Row(
           children: [
-            Expanded(
-              child: DefaultTextStyle(
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.subtitle2,
-                child: title,
-              ),
+            DefaultTextStyle(
+              maxLines: maxLines,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.subtitle2,
+              child: title,
             ),
-            ...actions,
+            ...leftActions,
+            if (rightActions.isNotEmpty) const Spacer(),
+            ...rightActions,
           ],
         ),
       ),
@@ -873,6 +878,10 @@ Widget clearInputButton(VoidCallback onPressed) {
   return inputDecorationSuffixButton(Icons.clear, onPressed);
 }
 
+Widget closeSearchDropdownButton(VoidCallback onPressed) {
+  return inputDecorationSuffixButton(Icons.close, onPressed);
+}
+
 Widget inputDecorationSuffixButton(IconData icon, VoidCallback onPressed) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: densePadding),
@@ -1025,8 +1034,8 @@ class CircularIconButton extends StatelessWidget {
       elevation: 0.0,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       constraints: const BoxConstraints.tightFor(
-        width: 24.0,
-        height: 24.0,
+        width: actionsIconSize,
+        height: actionsIconSize,
       ),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20.0),
@@ -1108,16 +1117,9 @@ extension ColorExtension on Color {
 
 /// Gets an alternating color to use for indexed UI elements.
 Color alternatingColorForIndex(int index, ColorScheme colorScheme) {
-  final color = colorScheme.defaultBackgroundColor;
-  return _colorForIndex(color, index, colorScheme);
-}
-
-Color _colorForIndex(Color color, int index, ColorScheme colorScheme) {
-  if (index % 2 == 1) {
-    return color;
-  } else {
-    return colorScheme.isLight ? color.darken() : color.brighten();
-  }
+  return index % 2 == 1
+      ? colorScheme.defaultBackgroundColor
+      : colorScheme.alternatingBackgroundColor;
 }
 
 class BreadcrumbNavigator extends StatelessWidget {
@@ -1256,19 +1258,27 @@ class _BreadcrumbPainter extends CustomPainter {
 }
 
 class FormattedJson extends StatelessWidget {
-  const FormattedJson({@required this.json});
+  const FormattedJson({
+    this.json,
+    this.formattedString,
+    this.useSubtleStyle = false,
+  }) : assert((json == null) != (formattedString == null));
 
   static const encoder = JsonEncoder.withIndent('  ');
 
   final Map<String, dynamic> json;
 
+  final String formattedString;
+
+  final bool useSubtleStyle;
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     // TODO(kenz): we could consider using a prettier format like YAML.
-    final formattedArgs = encoder.convert(json);
-    return Text(
-      formattedArgs,
-      style: Theme.of(context).fixedFontStyle,
+    return SelectableText(
+      json != null ? encoder.convert(json) : formattedString,
+      style: useSubtleStyle ? theme.subtleFixedFontStyle : theme.fixedFontStyle,
     );
   }
 }

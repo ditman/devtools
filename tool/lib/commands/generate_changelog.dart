@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// @dart=2.10
+
 import 'dart:async';
 import 'dart:convert' show jsonDecode;
 import 'dart:io';
 
-import 'package:http/http.dart' as http;
-
 import 'package:args/command_runner.dart';
+import 'package:http/http.dart' as http;
 
 import '../model.dart';
 

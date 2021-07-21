@@ -4,6 +4,8 @@
 
 // TODO(devoncarew): Upstream this class to the service protocol library.
 
+import 'package:flutter/foundation.dart';
+
 /// A single timeline event.
 class TraceEvent {
   /// Creates a timeline event given JSON-encoded event data.
@@ -39,6 +41,8 @@ class TraceEvent {
   static const flowEndPhase = 'f';
 
   static const gcCategory = 'GC';
+
+  static const frameNumberArg = 'frame_number';
 
   /// The original event JSON.
   final Map<String, dynamic> json;
@@ -92,17 +96,12 @@ class TraceEvent {
   /// Arbitrary data attached to the event.
   final Map<String, dynamic> args;
 
-  String get asyncUID {
-    if (scope == null) {
-      return '$category:$id';
-    } else {
-      return '$category:$scope:$id';
-    }
-  }
+  String get asyncUID =>
+      generateAsyncUID(id: id, category: category, scope: scope);
 
   TimelineEventType _type;
 
-  TimelineEventType get type => _type ??= TimelineEventType.unknown;
+  TimelineEventType get type => _type ??= TimelineEventType.other;
 
   set type(TimelineEventType t) => _type = t;
 
@@ -119,30 +118,40 @@ int _traceEventWrapperId = 0;
 
 class TraceEventWrapper implements Comparable<TraceEventWrapper> {
   TraceEventWrapper(this.event, this.timeReceived)
-      : id = _traceEventWrapperId++;
+      : wrapperId = _traceEventWrapperId++;
   final TraceEvent event;
 
   final num timeReceived;
 
-  final int id;
+  final int wrapperId;
 
   Map<String, dynamic> get json => event.json;
 
   bool processed = false;
 
+  bool get isShaderEvent => event.args['devtoolsTag'] == 'shaders';
+
   @override
   int compareTo(TraceEventWrapper other) {
     // Order events based on their timestamps. If the events share a timestamp,
     // order them in the order we received them.
-    final compare =
-        event.timestampMicros.compareTo(other.event.timestampMicros);
-    return compare != 0 ? compare : id.compareTo(other.id);
+    final compare = (event.timestampMicros ?? 0)
+        .compareTo(other.event.timestampMicros ?? 0);
+    return compare != 0 ? compare : wrapperId.compareTo(other.wrapperId);
   }
+}
+
+String generateAsyncUID({
+  @required String id,
+  @required String category,
+  String scope,
+}) {
+  return [category, if (scope != null) scope, id].join(':');
 }
 
 enum TimelineEventType {
   ui,
   raster,
   async,
-  unknown,
+  other,
 }

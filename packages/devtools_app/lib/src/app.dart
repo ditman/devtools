@@ -10,16 +10,17 @@ import 'package:provider/provider.dart';
 import '../devtools.dart' as devtools;
 import 'analytics/analytics_stub.dart'
     if (dart.library.html) 'analytics/analytics.dart' as ga;
-import 'analytics/constants.dart';
+import 'analytics/constants.dart' as analytics_constants;
 import 'analytics/provider.dart';
 import 'app_size/app_size_controller.dart';
 import 'app_size/app_size_screen.dart';
+import 'auto_dispose_mixin.dart';
 import 'common_widgets.dart';
-import 'config_specific/ide_theme/ide_theme.dart';
 import 'config_specific/server/server.dart';
 import 'debugger/debugger_controller.dart';
 import 'debugger/debugger_screen.dart';
 import 'dialogs.dart';
+import 'example/conditional_screen.dart';
 import 'framework/framework_core.dart';
 import 'globals.dart';
 import 'initializer.dart';
@@ -33,10 +34,13 @@ import 'memory/memory_screen.dart';
 import 'network/network_controller.dart';
 import 'network/network_screen.dart';
 import 'notifications.dart';
+import 'performance/legacy/performance_controller.dart';
+import 'performance/legacy/performance_screen.dart';
 import 'performance/performance_controller.dart';
 import 'performance/performance_screen.dart';
 import 'profiler/profiler_screen.dart';
 import 'profiler/profiler_screen_controller.dart';
+import 'provider/provider_screen.dart';
 import 'routing.dart';
 import 'scaffold.dart';
 import 'screen.dart';
@@ -46,6 +50,10 @@ import 'ui/service_extension_widgets.dart';
 import 'utils.dart';
 import 'vm_developer/vm_developer_tools_controller.dart';
 import 'vm_developer/vm_developer_tools_screen.dart';
+
+// Assign to true to use a sample implementation of a conditional screen.
+// WARNING: Do not check in this file if debugEnableSampleScreen is true.
+const debugEnableSampleScreen = false;
 
 // Disabled until VM developer mode functionality is added.
 const showVmDeveloperMode = false;
@@ -58,12 +66,10 @@ bool isExternalBuild = true;
 class DevToolsApp extends StatefulWidget {
   const DevToolsApp(
     this.screens,
-    this.ideTheme,
     this.analyticsProvider,
   );
 
   final List<DevToolsScreen> screens;
-  final IdeTheme ideTheme;
   final AnalyticsProvider analyticsProvider;
 
   @override
@@ -76,10 +82,8 @@ class DevToolsApp extends StatefulWidget {
 /// flutter route parameters.
 // TODO(https://github.com/flutter/devtools/issues/1146): Introduce tests that
 // navigate the full app.
-class DevToolsAppState extends State<DevToolsApp> {
+class DevToolsAppState extends State<DevToolsApp> with AutoDisposeMixin {
   List<Screen> get _screens => widget.screens.map((s) => s.screen).toList();
-
-  IdeTheme get ideTheme => widget.ideTheme;
 
   bool get isDarkThemeEnabled => _isDarkThemeEnabled;
   bool _isDarkThemeEnabled;
@@ -87,13 +91,16 @@ class DevToolsAppState extends State<DevToolsApp> {
   bool get vmDeveloperModeEnabled => _vmDeveloperModeEnabled;
   bool _vmDeveloperModeEnabled;
 
+  bool get denseModeEnabled => _denseModeEnabled;
+  bool _denseModeEnabled;
+
   @override
   void initState() {
     super.initState();
 
     ga.setupDimensions();
 
-    serviceManager.isolateManager.onSelectedIsolateChanged.listen((_) {
+    addAutoDisposeListener(serviceManager.isolateManager.mainIsolate, () {
       setState(() {
         _clearCachedRoutes();
       });
@@ -110,6 +117,13 @@ class DevToolsAppState extends State<DevToolsApp> {
     preferences.vmDeveloperModeEnabled.addListener(() {
       setState(() {
         _vmDeveloperModeEnabled = preferences.vmDeveloperModeEnabled.value;
+      });
+    });
+
+    _denseModeEnabled = preferences.denseModeEnabled.value;
+    preferences.denseModeEnabled.addListener(() {
+      setState(() {
+        _denseModeEnabled = preferences.denseModeEnabled.value;
       });
     });
   }
@@ -199,7 +213,10 @@ class DevToolsAppState extends State<DevToolsApp> {
             if (tabs.isEmpty) {
               return DevToolsScaffold.withChild(
                 child: CenteredMessage(
-                    'The "$page" screen is not available for this application.'),
+                  page != null
+                      ? 'The "$page" screen is not available for this application.'
+                      : 'No tabs available for this application.',
+                ),
                 ideTheme: ideTheme,
                 analyticsProvider: widget.analyticsProvider,
               );
@@ -290,7 +307,11 @@ class DevToolsAppState extends State<DevToolsApp> {
   Widget build(BuildContext context) {
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
-      theme: themeFor(isDarkTheme: isDarkThemeEnabled, ideTheme: ideTheme),
+      theme: themeFor(
+        isDarkTheme: isDarkThemeEnabled,
+        ideTheme: ideTheme,
+        theme: Theme.of(context),
+      ),
       builder: (context, child) => Notifications(child: child),
       routerDelegate: DevToolsRouterDelegate(_getPage),
       routeInformationParser: DevToolsRouteInformationParser(),
@@ -441,7 +462,10 @@ class ReportFeedbackButton extends StatelessWidget {
       tooltip: 'Report feedback',
       child: InkWell(
         onTap: () async {
-          ga.select(devToolsMain, feedbackButton);
+          ga.select(
+            analytics_constants.devToolsMain,
+            analytics_constants.feedbackButton,
+          );
           await launchUrl(
               devToolsExtensionPoints.issueTrackerLink().url, context);
         },
@@ -497,7 +521,10 @@ class DevToolsAboutDialog extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: () async {
-        ga.select(devToolsMain, feedbackLink);
+        ga.select(
+          analytics_constants.devToolsMain,
+          analytics_constants.feedbackLink,
+        );
         await launchUrl(reportIssuesLink.url, context);
       },
       child: Text(reportIssuesLink.display, style: linkTextStyle(colorScheme)),
@@ -519,6 +546,11 @@ class SettingsDialog extends StatelessWidget {
             label: const Text('Use a dark theme'),
             listenable: preferences.darkModeTheme,
             toggle: preferences.toggleDarkModeTheme,
+          ),
+          _buildOption(
+            label: const Text('Use dense mode'),
+            listenable: preferences.denseModeEnabled,
+            toggle: preferences.toggleDenseMode,
           ),
           if (isExternalBuild && isDevToolsServerAvailable)
             _buildOption(
@@ -578,6 +610,11 @@ List<DevToolsScreen> get defaultScreens {
       const InspectorScreen(),
       createController: () => InspectorSettingsController(),
     ),
+    DevToolsScreen<LegacyPerformanceController>(
+      const LegacyPerformanceScreen(),
+      createController: () => LegacyPerformanceController(),
+      supportsOffline: true,
+    ),
     DevToolsScreen<PerformanceController>(
       const PerformanceScreen(),
       createController: () => PerformanceController(),
@@ -604,6 +641,7 @@ List<DevToolsScreen> get defaultScreens {
       const LoggingScreen(),
       createController: () => LoggingController(),
     ),
+    DevToolsScreen<void>(const ProviderScreen(), createController: () {}),
     DevToolsScreen<AppSizeController>(
       const AppSizeScreen(),
       createController: () => AppSizeController(),
@@ -612,11 +650,12 @@ List<DevToolsScreen> get defaultScreens {
       VMDeveloperToolsScreen(controller: vmDeveloperToolsController),
       controller: vmDeveloperToolsController,
     ),
-// Uncomment to see a sample implementation of a conditional screen.
-//      DevToolsScreen<ExampleController>(
-//        const ExampleConditionalScreen(),
-//        createController: () => ExampleController(),
-//        supportsOffline: true,
-//      ),
+    // Show the sample DevTools screen.
+    if (debugEnableSampleScreen && (kDebugMode || kProfileMode))
+      DevToolsScreen<ExampleController>(
+        const ExampleConditionalScreen(),
+        createController: () => ExampleController(),
+        supportsOffline: true,
+      ),
   ];
 }

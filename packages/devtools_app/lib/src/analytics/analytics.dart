@@ -22,7 +22,7 @@ import '../config_specific/url/url.dart';
 import '../globals.dart';
 import '../ui/gtags.dart';
 import '../version.dart';
-import 'constants.dart';
+import 'constants.dart' as analytics_constants;
 
 // Dimensions1 AppType values:
 const String appTypeFlutter = 'flutter';
@@ -178,7 +178,7 @@ ValueListenable<bool> get gaEnabledNotifier => _gaEnabledNotifier;
 bool gaEnabled() => _gaEnabledNotifier.value;
 
 /// Request DevTools property value 'enabled' (GA enabled) stored in the file
-/// '~\.devtools'.
+/// '~/.devtools'.
 Future<bool> isAnalyticsEnabled() async {
   _gaEnabledNotifier.value = await server.isAnalyticsEnabled();
   return _gaEnabledNotifier.value;
@@ -200,7 +200,7 @@ void screen(
   GTag.event(
     screenName,
     GtagEventDevTools(
-      event_category: screenViewEvent,
+      event_category: analytics_constants.screenViewEvent,
       value: value,
       user_app: userAppType,
       user_build: userBuildType,
@@ -222,7 +222,7 @@ void select(
   GTag.event(
     screenName,
     GtagEventDevTools(
-      event_category: selectEvent,
+      event_category: analytics_constants.selectEvent,
       event_label: selectedItem,
       value: value,
       user_app: userAppType,
@@ -247,7 +247,7 @@ void selectFrame(
   GTag.event(
     screenName,
     GtagEventDevTools(
-      event_category: selectEvent,
+      event_category: analytics_constants.selectEvent,
       event_label: selectedItem,
       raster_duration: rasterDuration,
       ui_duration: uiDuration,
@@ -265,10 +265,10 @@ void selectFrame(
 
 String _lastGaError;
 
-void error(
-  String errorMessage,
-  bool fatal,
-) {
+void reportError(
+  String errorMessage, {
+  bool fatal = false,
+}) {
   // Don't keep recording same last error.
   if (_lastGaError == errorMessage) return;
   _lastGaError = errorMessage;
@@ -447,6 +447,7 @@ void computeFlutterClientId() async {
 }
 
 int _stillWaiting = 0;
+
 void waitForDimensionsComputed(String screenName) {
   Timer(const Duration(milliseconds: 100), () async {
     if (_analyticsComputed) {

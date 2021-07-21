@@ -6,7 +6,7 @@ import 'package:devtools_app/src/eval_on_dart_library.dart';
 import 'package:devtools_app/src/globals.dart';
 import 'package:devtools_testing/support/flutter_test_driver.dart';
 import 'package:devtools_testing/support/flutter_test_environment.dart';
-import 'package:test/test.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   final FlutterTestEnvironment env = FlutterTestEnvironment(
@@ -27,13 +27,13 @@ void main() {
   group('EvalOnDartLibrary', () {
     test('getHashCode', () async {
       await env.setupEnvironment();
-      final eval = EvalOnDartLibrary(['dart:core'], serviceManager.service);
+      final eval = EvalOnDartLibrary('dart:core', serviceManager.service);
 
       final instance = await eval.safeEval('42', isAlive: isAlive);
 
       await expectLater(
         eval.getHashCode(instance, isAlive: isAlive),
-        completion(42),
+        completion(anyOf(isPositive, 0)),
       );
     });
 
@@ -43,7 +43,7 @@ void main() {
         await env.setupEnvironment();
 
         final eval = EvalOnDartLibrary(
-          ['dart:core'],
+          'dart:core',
           serviceManager.service,
         );
 
@@ -57,10 +57,13 @@ void main() {
 
       test('returns the result of the future completion', () async {
         await env.setupEnvironment();
+        final mainIsolate = serviceManager.isolateManager.mainIsolate;
+        expect(mainIsolate, isNotNull);
 
         final eval = EvalOnDartLibrary(
-          ['dart:core'],
+          'dart:core',
           serviceManager.service,
+          isolate: mainIsolate,
         );
 
         final instance = await eval.asyncEval(
@@ -77,7 +80,7 @@ void main() {
         await env.setupEnvironment();
 
         final eval = EvalOnDartLibrary(
-          ['dart:core'],
+          'dart:core',
           serviceManager.service,
         );
 
@@ -116,5 +119,5 @@ void main() {
         expect(error.valueAsString, 'foo');
       });
     });
-  }, timeout: const Timeout.factor(8));
+  });
 }

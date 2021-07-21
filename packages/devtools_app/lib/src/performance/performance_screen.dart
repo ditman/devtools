@@ -25,6 +25,7 @@ import '../ui/icons.dart';
 import '../ui/service_extension_widgets.dart';
 import '../ui/utils.dart';
 import '../ui/vm_flag_widgets.dart';
+import '../version.dart';
 import 'event_details.dart';
 import 'flutter_frames_chart.dart';
 import 'performance_controller.dart';
@@ -40,11 +41,26 @@ class PerformanceScreen extends Screen {
           id: id,
           requiresDartVm: true,
           worksOffline: true,
+          shouldShowForFlutterVersion: _shouldShowForFlutterVersion,
           title: 'Performance',
           icon: Octicons.pulse,
         );
 
   static const id = 'performance';
+
+  static bool _shouldShowForFlutterVersion(FlutterVersion currentVersion) {
+    return currentVersion != null &&
+        currentVersion >=
+            SemanticVersion(
+              major: 2,
+              minor: 3,
+              // Specifying patch makes the version number more readable.
+              // ignore: avoid_redundant_argument_values
+              patch: 0,
+              preReleaseMajor: 16,
+              preReleaseMinor: 0,
+            );
+  }
 
   @override
   String get docPageId => id;
@@ -106,12 +122,6 @@ class PerformanceScreenBodyState extends State<PerformanceScreenBody>
 
     addAutoDisposeListener(controller.selectedFrame);
 
-    // Refresh data on page load if data is null. On subsequent tab changes,
-    // this should not be called.
-    if (controller.data == null && !offlineMode) {
-      controller.refreshData();
-    }
-
     // Load offline timeline data if available.
     if (shouldLoadOfflineData()) {
       // This is a workaround to guarantee that DevTools exports are compatible
@@ -158,7 +168,7 @@ class PerformanceScreenBodyState extends State<PerformanceScreenBody>
         Expanded(
           child: Split(
             axis: Axis.vertical,
-            initialFractions: const [0.6, 0.4],
+            initialFractions: const [0.7, 0.3],
             children: [
               TimelineFlameChartContainer(
                 processing: processing,
@@ -204,20 +214,23 @@ class PerformanceScreenBodyState extends State<PerformanceScreenBody>
 
   Widget _buildPrimaryStateControls() {
     return ValueListenableBuilder(
-      valueListenable: controller.refreshing,
-      builder: (context, refreshing, _) {
+      valueListenable: controller.recordingFrames,
+      builder: (context, recording, _) {
         return Row(
           children: [
-            RefreshButton(
+            PauseButton(
               includeTextWidth: _primaryControlsMinIncludeTextWidth,
-              onPressed:
-                  (refreshing || processing) ? null : _refreshPerformanceData,
+              onPressed: recording ? _pauseFrameRecording : null,
+            ),
+            const SizedBox(width: denseSpacing),
+            ResumeButton(
+              includeTextWidth: _primaryControlsMinIncludeTextWidth,
+              onPressed: recording ? null : _resumeFrameRecording,
             ),
             const SizedBox(width: defaultSpacing),
             ClearButton(
               includeTextWidth: _primaryControlsMinIncludeTextWidth,
-              onPressed:
-                  (refreshing || processing) ? null : _clearPerformanceData,
+              onPressed: processing ? null : _clearPerformanceData,
             ),
           ],
         );
@@ -229,7 +242,11 @@ class PerformanceScreenBodyState extends State<PerformanceScreenBody>
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        const ProfileGranularityDropdown(PerformanceScreen.id),
+        ProfileGranularityDropdown(
+          screenId: PerformanceScreen.id,
+          profileGranularityFlagNotifier:
+              controller.cpuProfilerController.profileGranularityFlagNotifier,
+        ),
         const SizedBox(width: defaultSpacing),
         if (!serviceManager.connectedApp.isDartCliAppNow)
           ServiceExtensionButtonGroup(
@@ -246,7 +263,7 @@ class PerformanceScreenBodyState extends State<PerformanceScreenBody>
         const SizedBox(width: defaultSpacing),
         SettingsOutlinedButton(
           onPressed: _openSettingsDialog,
-          tooltip: 'Performance Settings',
+          label: 'Performance Settings',
         ),
       ],
     );
@@ -259,8 +276,12 @@ class PerformanceScreenBodyState extends State<PerformanceScreenBody>
     );
   }
 
-  Future<void> _refreshPerformanceData() async {
-    await controller.refreshData();
+  void _pauseFrameRecording() {
+    controller.toggleRecordingFrames(false);
+  }
+
+  void _resumeFrameRecording() {
+    controller.toggleRecordingFrames(true);
   }
 
   Future<void> _clearPerformanceData() async {

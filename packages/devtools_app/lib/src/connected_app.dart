@@ -4,9 +4,14 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
+import 'config_specific/logger/logger.dart' as logger;
 import 'eval_on_dart_library.dart';
 import 'globals.dart';
+import 'service_registrations.dart' as registrations;
 import 'title.dart';
+import 'version.dart';
 
 const flutterLibraryUri = 'package:flutter/src/widgets/binding.dart';
 const dartHtmlLibraryUri = 'dart:html';
@@ -14,8 +19,13 @@ const dartHtmlLibraryUri = 'dart:html';
 class ConnectedApp {
   ConnectedApp();
 
-  bool get appTypeKnown =>
-      _isFlutterApp != null && _isProfileBuild != null && _isDartWebApp != null;
+  bool get connectedAppInitialized =>
+      _isFlutterApp != null &&
+      (_isFlutterApp == false ||
+          _isDartWebApp == true ||
+          _flutterVersion != null) &&
+      _isProfileBuild != null &&
+      _isDartWebApp != null;
 
   // TODO(kenz): investigate if we can use `libraryUriAvailableNow` instead.
   Future<bool> get isFlutterApp async => _isFlutterApp ??=
@@ -27,6 +37,17 @@ class ConnectedApp {
   }
 
   bool _isFlutterApp;
+
+  FlutterVersion get flutterVersionNow {
+    assert(isFlutterNativeAppNow);
+    return _flutterVersion;
+  }
+
+  FlutterVersion _flutterVersion;
+
+  final _flutterVersionCompleter = Completer<FlutterVersion>();
+
+  static const _flutterVersionTimeout = Duration(seconds: 3);
 
   Future<bool> get isProfileBuild async {
     _isProfileBuild ??= await _connectedToProfileBuild();
@@ -53,6 +74,8 @@ class ConnectedApp {
 
   bool get isFlutterWebAppNow => isFlutterAppNow && isDartWebAppNow;
 
+  bool get isFlutterNativeAppNow => isFlutterAppNow && !isDartWebAppNow;
+
   bool get isDebugFlutterAppNow => isFlutterAppNow && !isProfileBuildNow;
 
   bool get isRunningOnDartVM => serviceManager.vm.name != 'ChromeDebugProxy';
@@ -69,8 +92,14 @@ class ConnectedApp {
     }
 
     // If eval works we're not a profile build.
-    final io = EvalOnDartLibrary(['dart:io'], serviceManager.service);
-    final value = await io.eval('Platform.isAndroid', isAlive: null);
+    final io = EvalOnDartLibrary('dart:io', serviceManager.service);
+    // Do not log the error if this eval fails - we expect it to fail for a
+    // profile build.
+    final value = await io.eval(
+      'Platform.isAndroid',
+      isAlive: null,
+      shouldLogError: false,
+    );
     return !(value?.kind == 'Bool');
 
     // TODO(terry): Disabled below code, it will hang if flutter run --start-paused
@@ -94,6 +123,34 @@ class ConnectedApp {
 
   Future<void> initializeValues() async {
     await Future.wait([isFlutterApp, isProfileBuild, isDartWebApp]);
+
+    // No need to check the flutter version for Flutter web apps, as the
+    // performance tools that consume [flutterVersionNow] are not available for
+    // flutter web apps.
+    if (isFlutterNativeAppNow) {
+      final flutterVersionServiceListenable = serviceManager
+          .registeredServiceListenable(registrations.flutterVersion.service);
+      VoidCallback listener;
+      flutterVersionServiceListenable.addListener(listener = () async {
+        final registered = flutterVersionServiceListenable.value;
+        if (registered) {
+          _flutterVersionCompleter.complete(
+              FlutterVersion.parse((await serviceManager.flutterVersion).json));
+        }
+      });
+
+      _flutterVersion = await _flutterVersionCompleter.future.timeout(
+        _flutterVersionTimeout,
+        onTimeout: () {
+          logger.log(
+            'Timed out trying to fetch flutter version from '
+            '`ConnectedApp.initializeValues`.',
+          );
+          return Future<FlutterVersion>.value();
+        },
+      );
+      flutterVersionServiceListenable.removeListener(listener);
+    }
     generateDevToolsTitle();
   }
 }

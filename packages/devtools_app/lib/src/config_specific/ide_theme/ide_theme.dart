@@ -3,6 +3,7 @@
 // in the LICENSE file.
 
 import 'package:flutter/widgets.dart';
+import '../../theme.dart';
 
 export 'ide_theme_stub.dart'
     if (dart.library.html) 'ide_theme_web.dart'
@@ -10,9 +11,18 @@ export 'ide_theme_stub.dart'
 
 /// IDE-supplied theming.
 class IdeTheme {
-  IdeTheme({this.backgroundColor, this.foregroundColor, this.fontSize});
+  IdeTheme({
+    this.backgroundColor,
+    this.foregroundColor,
+    this.fontSize,
+    this.embed,
+  });
 
-  Color backgroundColor;
-  Color foregroundColor;
-  double fontSize;
+  final Color backgroundColor;
+  final Color foregroundColor;
+  final double fontSize;
+  final bool embed;
+
+  double get fontSizeFactor =>
+      fontSize != null ? fontSize / defaultFontSize : 1.0;
 }

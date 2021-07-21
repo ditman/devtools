@@ -13,7 +13,6 @@ import '../auto_dispose_mixin.dart';
 import '../split.dart';
 import '../table.dart';
 import '../table_data.dart';
-import '../theme.dart';
 import '../ui/icons.dart';
 import '../ui/search.dart';
 import '../utils.dart';
@@ -22,24 +21,19 @@ import 'memory_controller.dart';
 import 'memory_tracker_model.dart';
 
 // Track Image.
-Image trackImage(BuildContext context) {
-  final themeData = Theme.of(context);
+ThemedImageIcon trackImage(BuildContext context) {
   // TODO(terry): Match shape in event pane.
-  return createImageIcon(
-    themeData.isDarkTheme
-        ? 'icons/memory/communities_white.png'
-        : 'icons/memory/communities_black.png',
+  return const ThemedImageIcon(
+    darkModeAsset: 'icons/memory/communities_white.png',
+    lightModeAsset: 'icons/memory/communities_black.png',
   );
 }
 
-Image resetImage(BuildContext context) {
-  final themeData = Theme.of(context);
-
-  return createImageIcon(
-    // TODO(terry): Match shape in event pane.
-    themeData.isDarkTheme
-        ? 'icons/memory/reset_icon_white.png'
-        : 'icons/memory/reset_icon_black.png',
+ThemedImageIcon resetImage(BuildContext context) {
+// TODO(terry): Match shape in event pane.
+  return const ThemedImageIcon(
+    darkModeAsset: 'icons/memory/reset_icon_white.png',
+    lightModeAsset: 'icons/memory/reset_icon_black.png',
   );
 }
 
@@ -122,37 +116,6 @@ class AllocationTableViewState extends State<AllocationTableView>
   }
 
   void _handleSearch() {
-    if (_trySelectItem()) {
-      setState(() {
-        controller.closeAutoCompleteOverlay();
-      });
-    }
-  }
-
-  /// Search the allocation data for a match (auto-complete).
-  List<String> _allocationMatches(String searchingValue) {
-    final matches = <String>[];
-
-    // Matches that start with searchingValue, most relevant.
-    final startMatches = <String>[];
-
-    // TODO(terry): Consider matches using the starts and the containing are added
-    //              at end using addAll().  Also, should not build large list just
-    //              up to max needed.
-    for (var allocation in controller.monitorAllocations) {
-      final knownName = allocation.classRef.name;
-      if (knownName.startsWith(searchingValue)) {
-        startMatches.add(knownName);
-      } else if (knownName.contains(searchingValue.toLowerCase())) {
-        matches.add(knownName);
-      }
-    }
-
-    matches.insertAll(0, startMatches);
-    return matches;
-  }
-
-  bool _trySelectItem() {
     final searchingValue = controller.search;
     if (searchingValue.isNotEmpty) {
       if (controller.selectTheSearch) {
@@ -160,7 +123,7 @@ class AllocationTableViewState extends State<AllocationTableView>
         controller.selectItemInAllocationTable(searchingValue);
         controller.selectTheSearch = false;
         controller.resetSearch();
-        return true;
+        return;
       }
 
       // No exact match, return the list of possible matches.
@@ -176,8 +139,33 @@ class AllocationTableViewState extends State<AllocationTableView>
         min(topMatchesLimit, sortedAllocationMatches.length),
       );
     }
+  }
 
-    return false;
+  /// Search the allocation data for a match (auto-complete).
+  List<String> _allocationMatches(String searchingValue) {
+    final matches = <String>[];
+
+    final lcSearchingValue = searchingValue.toLowerCase();
+
+    // Matches that start with searchingValue, most relevant.
+    final startMatches = <String>[];
+
+    // TODO(terry): Consider matches using the starts and the containing are added
+    //              at end using addAll().  Also, should not build large list just
+    //              up to max needed.
+    for (var allocation in controller.monitorAllocations) {
+      final knownName = allocation.classRef.name;
+      if (knownName.startsWith(searchingValue)) {
+        startMatches.add(knownName);
+      } else if (knownName.contains(searchingValue)) {
+        startMatches.add(knownName);
+      } else if (knownName.toLowerCase().contains(lcSearchingValue)) {
+        matches.add(knownName);
+      }
+    }
+
+    matches.insertAll(0, startMatches);
+    return matches;
   }
 
   @override
@@ -215,10 +203,7 @@ class AllocationTableViewState extends State<AllocationTableView>
           controller.toggleAllocationTracking(ref, !ref.isStacktraced),
       sortColumn: controller.sortedMonitorColumn,
       sortDirection: controller.sortedMonitorDirection,
-      onSortChanged: (
-        column,
-        direction,
-      ) {
+      onSortChanged: (column, direction, {secondarySortColumn}) {
         controller.sortedMonitorColumn = column;
         controller.sortedMonitorDirection = direction;
       },
